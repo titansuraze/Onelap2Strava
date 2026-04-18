@@ -135,7 +135,7 @@
 
 ---
 
-## Phase 4 📋：定时同步（CLI / 常驻进程）
+## Phase 4 ✅：定时同步（CLI / 常驻进程）
 
 ### 目标
 在**不依赖 Web 界面**的前提下，让同步按日程自动运行：用户骑行后无需记得手动执行 `sync`，降低「想起来才同步」的遗漏。
@@ -159,6 +159,11 @@
 ### 交付标准
 - 用户可按文档在 Windows / Linux 上配置计划任务，实现无人值守的增量同步。
 - 行为可预期：无新活动时安静退出；网络/Cookie 问题时失败可见（日志或退出码）。
+
+### 实际落地与偏差
+- ✅ 交付物为 **文档 + README 指引**：系统计划任务 / `cron` / `systemd.timer` 调用既有 `uv run onelap2strava sync --incremental`，不新增常驻进程、不新增定时类 CLI 参数（间隔与时刻由调度器表达）。详见 [contexts/phase4-scheduled-sync.md](../contexts/phase4-scheduled-sync.md)。
+- **未实现**路线图中的可选 `sync --dry-run`；排障沿用 `sync-log`、`onelap-list` 与全局 `-v`（见上述文档 §7）。
+- **与「CLI / 常驻进程」标题的关系**：推荐路径仍是 **一次性进程 + OS 调度**；若未来做进程内 APScheduler 等，属可选增强，非本阶段交付。
 
 ### 本阶段不做
 - Web UI、多租户。
@@ -214,7 +219,7 @@ Phase 2 ✅ 自动化顽鹿侧（手粘 Cookie + sync 一条命令）
 Phase 3 ✅ 去重 + 容错 + 增量（需浏览器的顽鹿续期 → Phase 5）
    │
    ▼
-Phase 4 📋 定时同步（计划任务驱动 CLI，解放「记得跑 sync」）
+Phase 4 ✅ 定时同步（计划任务驱动 CLI，解放「记得跑 sync」）
    │
    ▼
 Phase 5 💡 Web 化（按需；含浏览器侧 Cookie 续期与托管形态下的定时同步）
