@@ -38,6 +38,7 @@ data/.onelap_cookies.json
 data/.onelap_sync.json
 data/*.json
 data/.sync.db
+data/sync-cron.log
 data/*.db
 data/*.db-journal
 
