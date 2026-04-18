@@ -31,7 +31,11 @@ Thumbs.db
 .env
 data/output/
 data/input/
+data/cache/
+data/reference/
 data/.strava_token.json
+data/.onelap_cookies.json
+data/.onelap_sync.json
 data/*.json
 
 # Test cache

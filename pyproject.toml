@@ -21,6 +21,7 @@ onelap2strava = "onelap2strava.cli:app"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "responses>=0.25",
 ]
 
 [build-system]
