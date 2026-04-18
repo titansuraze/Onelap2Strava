@@ -8,6 +8,8 @@ surface wires through correctly.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -411,6 +413,76 @@ def test_strava_configure_probe_network_failure_surfaces_skip_hint(
     assert "could not reach Strava" in combined
     assert "--skip-verify" in combined
     assert not env_path.exists()
+
+
+def test_auto_sync_rejects_unknown_action() -> None:
+    result = runner.invoke(app, ["auto-sync", "maybe"])
+    assert result.exit_code == 2
+    assert "install 或 uninstall" in (result.stdout + (result.stderr or ""))
+
+
+def test_auto_sync_install_validates_every() -> None:
+    result = runner.invoke(
+        app, ["auto-sync", "install", "--mode", "hourly", "--every", "99"]
+    )
+    assert result.exit_code == 2
+    assert "1–23" in (result.stdout + (result.stderr or ""))
+
+
+def test_auto_sync_install_validates_at() -> None:
+    result = runner.invoke(
+        app, ["auto-sync", "install", "--mode", "daily", "--at", "25:00"]
+    )
+    assert result.exit_code == 2
+
+
+def test_auto_sync_install_hourly_delegates_unix(tmp_path: Path, monkeypatch) -> None:
+    bf = tmp_path / "batchfiles"
+    bf.mkdir()
+    (bf / "install-scheduled-sync-unix.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+
+    monkeypatch.setattr("onelap2strava.cli._batchfiles_dir", lambda: bf)
+    captured: dict = {}
+
+    def fake_run(cmd, cwd=None, **_kwargs):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = cwd
+        return subprocess.CompletedProcess(cmd, 0, "")
+
+    monkeypatch.setattr("onelap2strava.cli.subprocess.run", fake_run)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "onelap2strava.cli.shutil.which", lambda name: "/bin/bash" if name == "bash" else None
+    )
+
+    result = runner.invoke(
+        app, ["auto-sync", "install", "--mode", "hourly", "--every", "3"]
+    )
+    assert result.exit_code == 0
+    assert captured["cmd"][-2:] == ["hourly", "3"]
+    assert captured["cwd"] == str(tmp_path)
+
+
+def test_auto_sync_install_daily_delegates_windows(tmp_path: Path, monkeypatch) -> None:
+    bf = tmp_path / "batchfiles"
+    bf.mkdir()
+    (bf / "install-scheduled-sync-windows.cmd").write_text("@exit 0\r\n", encoding="utf-8")
+
+    monkeypatch.setattr("onelap2strava.cli._batchfiles_dir", lambda: bf)
+    captured: dict = {}
+
+    def fake_run(cmd, cwd=None, **_kwargs):
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "")
+
+    monkeypatch.setattr("onelap2strava.cli.subprocess.run", fake_run)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    result = runner.invoke(
+        app, ["auto-sync", "install", "--mode", "daily", "--at", "07:30"]
+    )
+    assert result.exit_code == 0
+    assert captured["cmd"][-2:] == ["daily", "07:30"]
 
 
 def test_sync_incremental_flag_passes_through(monkeypatch) -> None:

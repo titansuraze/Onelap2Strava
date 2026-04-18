@@ -15,7 +15,9 @@ uv run onelap2strava sync --incremental
 
 ### `batchfiles/` 便捷脚本（可选）
 
-若不想在图形界面里逐字段配置，可使用 [`batchfiles/`](../batchfiles/) 下的脚本——它们**只负责注册系统调度**，实际执行的仍是 `uv run onelap2strava sync --incremental`（工作目录为**仓库根**，脚本内已 `cd` 上一级）：
+若不想在图形界面里逐字段配置，可优先使用 **`uv run onelap2strava auto-sync install`**（参数 `--mode hourly|daily`、`--every`、`--at`），由 CLI 转调本目录脚本；亦可直接运行下表中的文件。
+
+脚本**只负责注册系统调度**，实际执行的仍是 `uv run onelap2strava sync --incremental`（工作目录为**仓库根**，包装脚本已 `cd` 到仓库根）：
 
 | 文件 | 作用 |
 | --- | --- |

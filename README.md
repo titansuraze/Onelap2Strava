@@ -106,12 +106,20 @@ uv run onelap2strava sync --force         # 跳过所有去重，强制上传
 uv run onelap2strava sync --incremental
 ```
 
-「每隔多久、每天几点」由**系统调度**表达（不是 `sync` 的子参数）。[`batchfiles/`](batchfiles/) 目录提供一键注册脚本（编辑脚本顶部的 `SYNC_MODE` / 间隔 / 时刻后执行一次即可）：
+「每隔多久、每天几点」由**系统调度**表达（不是 `sync` 的子参数）。推荐用 CLI 注册（内部调用 `batchfiles/` 下同名脚本）：
+
+```bash
+uv run onelap2strava auto-sync install --mode hourly --every 4    # 每 4 小时
+uv run onelap2strava auto-sync install --mode daily --at 22:00      # 每天 22:00
+uv run onelap2strava auto-sync uninstall                            # 移除
+```
+
+也可直接运行 [`batchfiles/`](batchfiles/) 中的脚本（或编辑脚本内默认值后双击 / 执行）：
 
 | 系统 | 一次性执行 | 注册定时任务 |
 | --- | --- | --- |
-| Windows | `batchfiles\run-incremental-sync.cmd` | `batchfiles\install-scheduled-sync-windows.cmd`（可选参数 `uninstall` 删除任务） |
-| Linux / macOS | `chmod +x batchfiles/run-incremental-sync.sh` 后 `./batchfiles/run-incremental-sync.sh` | `./batchfiles/install-scheduled-sync-unix.sh`（`--remove` 移除 crontab 条目） |
+| Windows | `batchfiles\run-incremental-sync.cmd` | `batchfiles\install-scheduled-sync-windows.cmd`（支持参数 `hourly N` / `daily HH:mm`，或 `uninstall`） |
+| Linux / macOS | `chmod +x batchfiles/run-incremental-sync.sh` 后 `./batchfiles/run-incremental-sync.sh` | `./batchfiles/install-scheduled-sync-unix.sh`（同上参数，`--remove` 移除 crontab 条目） |
 
 手动配置任务计划 / `cron` 的说明、退出码与排障见 [contexts/phase4-scheduled-sync.md](contexts/phase4-scheduled-sync.md)。
 
@@ -270,7 +278,7 @@ Onelap2Strava/
 ## 测试
 
 ```bash
-uv run pytest           # 82 个测试，约 60 秒
+uv run pytest           # 87 个测试，约 60 秒
 uv run pytest -s        # 打印夹具对比的 bias vs fixed 指标
 ```
 
@@ -281,7 +289,7 @@ uv run pytest -s        # 打印夹具对比的 bias vs fixed 指标
 - **顽鹿接口层单测**（`tests/test_onelap_client.py`，17 个）：用 `responses` mock HTTP，覆盖 Cookie 解析、列表解析排序、限量、会话过期（HTML 响应 / 401）识别、下载流式写入与缓存命中。
 - **同步流水线 mock 测试**（`tests/test_sync.py`，11 个）：端到端用假 Onelap + 假 Strava 跑通"拉 → 修 → 传"，覆盖 Strava 时间窗去重、单条失败不阻塞、Phase 3.1 的模糊去重命中、`--force` 绕过、重试成功/耗尽、非瞬时错误不重试、`--incremental` 过滤 seen id、首次启用 backfill。
 - **同步日志单测**（`tests/test_sync_log.py`，17 个）：schema 幂等、三元组边界（时间窗 / 时长比 / 起点距离）、failed 不混入模糊去重、backfilled 参与模糊去重但不污染增量 seen 集、backfill 对空目录 / 真 fit / 解析失败的处理。
-- **CLI 契约测试**（`tests/test_cli.py`，5 个）：`--incremental` 和 `--n` 互斥校验、`sync-log` 子命令的空/有数据路径、参数穿透到 `run_sync`。
+- **CLI 契约测试**（`tests/test_cli.py`，20 个）：`--incremental` 和 `--n` 互斥、`sync-log`、`strava-configure`、`auto-sync` 委托与校验等。
 
 > `test_data/*.fit` 包含真实骑行轨迹（隐私原因）不在 git 里。本地缺文件时这 3 个测试会自动 **skip** 而不是失败，坐标测试仍能跑。想运行完整回归测试，把对应文件名的 fit 放到 `test_data/`（参见 [test_data/README.md](test_data/README.md)）。
 

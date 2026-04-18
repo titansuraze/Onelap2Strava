@@ -17,11 +17,15 @@ Onelap-pull commands:
 - ``onelap-login``: save Onelap session cookies (manual paste from DevTools).
 - ``onelap-list`` : show recent activities on Onelap (debug aid).
 - ``sync``        : pull latest Onelap activities and upload to Strava end-to-end.
+- ``auto-sync``   : register/remove OS scheduled sync via ``batchfiles/`` scripts.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -67,6 +71,127 @@ def _main(
 
 
 DEFAULT_ENV_PATH = Path(".env")
+
+_AT_CLOCK = re.compile(r"^(\d{1,2}):(\d{2})$")
+
+
+def _batchfiles_dir() -> Path:
+    """``batchfiles/`` at repository root (next to ``src/``)."""
+    root = Path(__file__).resolve().parent.parent.parent
+    d = root / "batchfiles"
+    if not d.is_dir():
+        typer.echo(
+            f"[error] 未找到 {d}。auto-sync 仅在完整克隆仓库且含 batchfiles/ 时可用。",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    return d
+
+
+def _validate_auto_sync_install(mode: str, every: int, at: str) -> None:
+    ml = mode.lower()
+    if ml not in ("hourly", "daily"):
+        typer.echo("[error] --mode 须为 hourly 或 daily。", err=True)
+        raise typer.Exit(code=2)
+    if ml == "hourly":
+        if every < 1 or every > 23:
+            typer.echo("[error] --every 须在 1–23（小时）。", err=True)
+            raise typer.Exit(code=2)
+    else:
+        m = _AT_CLOCK.match(at.strip())
+        if not m:
+            typer.echo(
+                "[error] --at 须为 HH:MM（24 小时制），例如 22:00 或 7:30。",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        h, mn = int(m.group(1)), int(m.group(2))
+        if h > 23 or mn > 59:
+            typer.echo("[error] --at 时间无效。", err=True)
+            raise typer.Exit(code=2)
+
+
+@app.command(name="auto-sync")
+def auto_sync(
+    action: str = typer.Argument(
+        ...,
+        help="install：注册系统定时任务；uninstall：移除。",
+    ),
+    mode: str = typer.Option(
+        "hourly",
+        "--mode",
+        "-m",
+        help="install 时：hourly（每 N 小时）或 daily（每天固定时刻）。",
+    ),
+    every: int = typer.Option(
+        4,
+        "--every",
+        "-e",
+        help="install 且 hourly：间隔小时数（1–23）。",
+    ),
+    at: str = typer.Option(
+        "22:00",
+        "--at",
+        help="install 且 daily：每天运行时间（HH:MM）。",
+    ),
+    task_name: str | None = typer.Option(
+        None,
+        "--task-name",
+        help="仅 uninstall：Windows 计划任务名称（默认 Onelap2StravaIncrementalSync）。",
+    ),
+) -> None:
+    """调用 ``batchfiles/`` 下的脚本注册或移除定时增量同步（非 Python 内嵌调度）。"""
+    act = action.strip().lower()
+    if act not in ("install", "uninstall"):
+        typer.echo(
+            f"[error] ACTION 须为 install 或 uninstall，收到 {action!r}。",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    bf = _batchfiles_dir()
+    repo_root = bf.parent
+
+    if act == "uninstall":
+        if sys.platform == "win32":
+            cmd: list[str] = [
+                str(bf / "install-scheduled-sync-windows.cmd"),
+                "uninstall",
+            ]
+            if task_name:
+                cmd.append(task_name)
+        else:
+            bash = shutil.which("bash")
+            if not bash:
+                typer.echo("[error] 未找到 bash，无法执行卸载脚本。", err=True)
+                raise typer.Exit(code=1)
+            cmd = [bash, str(bf / "install-scheduled-sync-unix.sh"), "--remove"]
+        proc = subprocess.run(cmd, cwd=str(repo_root))
+        raise typer.Exit(code=proc.returncode)
+
+    _validate_auto_sync_install(mode, every, at)
+    ml = mode.lower()
+    if sys.platform == "win32":
+        if ml == "hourly":
+            cmd = [
+                str(bf / "install-scheduled-sync-windows.cmd"),
+                "hourly",
+                str(every),
+            ]
+        else:
+            cmd = [str(bf / "install-scheduled-sync-windows.cmd"), "daily", at.strip()]
+        proc = subprocess.run(cmd, cwd=str(repo_root))
+    else:
+        bash = shutil.which("bash")
+        if not bash:
+            typer.echo("[error] 未找到 bash，无法执行 install-scheduled-sync-unix.sh。", err=True)
+            raise typer.Exit(code=1)
+        if ml == "hourly":
+            cmd = [bash, str(bf / "install-scheduled-sync-unix.sh"), "hourly", str(every)]
+        else:
+            cmd = [bash, str(bf / "install-scheduled-sync-unix.sh"), "daily", at.strip()]
+        proc = subprocess.run(cmd, cwd=str(repo_root))
+    raise typer.Exit(code=proc.returncode)
 
 # Strava's official OAuth token endpoint. Note the /api/v3/ prefix — the
 # short /oauth/token URL shown in older docs only serves user-facing HTML.

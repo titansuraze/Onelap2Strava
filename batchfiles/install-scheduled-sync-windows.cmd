@@ -6,18 +6,27 @@ if /i "%~1"=="uninstall" goto :uninstall
 if /i "%~1"=="remove" goto :uninstall
 
 REM =============================================================================
-REM 用户配置：按需修改后，在资源管理器中双击本文件，或在「以管理员身份运行」的
-REM cmd 中执行：batchfiles\install-scheduled-sync-windows.cmd
-REM
-REM SYNC_MODE=hourly  — 每 HOURLY_INTERVAL 小时运行一次（整点起算，与任务计划「按间隔」一致）
-REM SYNC_MODE=daily   — 每天在 DAILY_TIME 运行一次（24 小时制 HH:mm）
+REM 无参数：使用下方默认值。
+REM 命令行覆盖：hourly N  或  daily HH:mm
+REM 亦可通过 auto-sync 子命令调用（见主 README）。
 REM =============================================================================
 set "TASK_NAME=Onelap2StravaIncrementalSync"
 set "SYNC_MODE=hourly"
 set "HOURLY_INTERVAL=4"
 set "DAILY_TIME=22:00"
-REM =============================================================================
 
+if /i "%~1"=="hourly" (
+  set "SYNC_MODE=hourly"
+  if not "%~2"=="" set "HOURLY_INTERVAL=%~2"
+  goto :ready
+)
+if /i "%~1"=="daily" (
+  set "SYNC_MODE=daily"
+  if not "%~2"=="" set "DAILY_TIME=%~2"
+  goto :ready
+)
+
+:ready
 set "RUNNER=%~dp0run-incremental-sync.cmd"
 if not exist "%RUNNER%" (
   echo [error] 找不到同目录下的 run-incremental-sync.cmd >&2
@@ -50,7 +59,7 @@ if /i "%SYNC_MODE%"=="hourly" (
 )
 
 echo [ok] 计划任务已注册。查看：schtasks /query /tn "%TASK_NAME%" /v /fo LIST
-echo      卸载：batchfiles\install-scheduled-sync-windows.cmd uninstall
+echo      卸载：uv run onelap2strava auto-sync uninstall
 exit /b 0
 
 :uninstall
