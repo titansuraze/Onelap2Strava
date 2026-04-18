@@ -84,7 +84,7 @@
 
 ---
 
-## Phase 3 📋：去重与容错增强
+## Phase 3 🚧：去重与容错增强（拆成 3.1 ✅ + 3.2 📋）
 
 ### 目标
 应对长期使用中的真实场景：避免重复上传、应对各种失败情况、减少 Cookie 过期时的 UX 摩擦。
@@ -93,20 +93,59 @@
 - 仍是单用户 CLI 工具。
 - 重点增强**同步链路**的健壮性和**登录态**的耐用性。
 
-### 关键技术点
+### 关键技术点（原规划，供参考）
 - **模糊去重**：目前 Phase 1 的"时间 ±10 分钟 + external_id sha1"够用但不够强——顽鹿可能对同一骑行重新导出（字节不同但内容几乎一致）。升级为"开始时间 ±10 分钟 **+** 总时长差 <5% **+** 起点距离 <500m"三元组。
 - **失败重试**：上传超时/网络失败自动重试（指数退避，最多 3 次）。`sync.py::_sync_one` 外层加即可，当前单条失败已不阻塞其它，但没重试。
 - **本地 SQLite 同步日志**：记录每次同步的 Fit 哈希 / Strava activity ID / 时间戳，便于审计、回溯、支撑模糊去重。`data/cache/` 目录天然是"已处理记录"的源头。
 - **增量同步**：Phase 2 的"最新一条"扩展为"自上次同步以来的所有新骑行"，配合 SQLite 日志做断点。
 - **Cookie 过期时的流畅续期**：目前过期要跑两步（浏览器刷新 + 重跑 `onelap-login`）。实现路径**不**再试 `browser-cookie3`（v3 已证明 ABE 在 Windows 上不可靠），而是考虑**嵌入 WebView**（Playwright / pywebview 的 `storage_state`）复用用户浏览器 session，规避 ABE 的根本边界——DPAPI 密钥不在我们手里。决策前先评估 WebView 的安装摩擦是否真比手粘一次更小。
 
-### 交付标准
-- 连续运行 `sync` 命令多次，不会产生重复活动（模糊去重生效）。
-- 网络异常/上传失败能自动重试并最终成功或明确失败提示。
-- 本地有清晰的同步日志/状态表可查（`data/.onelap_sync.json` 或 `data/.sync.db`）。
-- Cookie 过期时 UX 摩擦显著降低（可选：WebView 自动续期，或至少不需要两步操作）。
+### 实际落地与偏差
 
-### 本阶段不做
+原 Phase 3 的五件事在执行时拆成 **3.1（去重 + 容错 + 日志 + 增量）** 和 **3.2（Cookie 续期）** 两个小阶段——前四件技术底座一致（共用一张 SQLite 表），而 Cookie 续期的最优路径依赖"真实过期频率"这类需要时间积累的数据，强行放一起反而会被最不确定的一项拖累。决策细节见 [contexts/phase3.1-dedupe-and-resilience.md §1](../contexts/phase3.1-dedupe-and-resilience.md)。
+
+### Phase 3.1 ✅：去重 + 容错 + 日志 + 增量
+
+#### 交付清单
+- **本地 SQLite 同步日志**：`data/.sync.db` 单表 `synced_activities`，主键 `onelap_activity_id`，status 列区分 ok / duplicate / failed / backfilled。首次启用自动扫描 `data/cache/` 做 backfill，模糊去重从第一次就生效。
+- **三层去重**（不是替换而是叠加）：本地模糊三元组（新）→ Strava `get_activities ±10min`（Phase 1 原有）→ Strava `external_id` sha1（Phase 1 原有）。本地命中即跳过后两层 Strava 查询，`--force` 同时绕过前两层保留最后一层。
+- **失败重试**：`_with_retry` 指数退避 1s/2s/4s，白名单重试 `ConnectionError` / `Timeout` / `ChunkedEncodingError`；auth 错误 / 4xx / `ValueError` 立即失败，避免重试放大副作用。
+- **增量同步**：`sync --incremental` 按 `onelap_activity_id` 过滤已处理活动。保持 `--n 1` 为默认不变，两者互斥（`--incremental --n 5` 直接 exit 2）。
+- **新增子命令 `sync-log`**：列出最近 N 行，用于"上次同步跑到哪"的审计。
+
+#### 与原计划的偏差（诚实记录）
+
+| 维度 | 原计划 | 实际落地 | 原因 |
+| --- | --- | --- | --- |
+| 去重策略 | "**升级为**三元组"，听起来替换 | **在原有两层 Strava 去重上 叠加** 一层本地模糊 | 启发式不是正确性边界；多一层服务端兜底才敢让本地大胆跳过 Strava 查询（[phase3.1 §2.2](../contexts/phase3.1-dedupe-and-resilience.md)） |
+| SQLite 字段 | "Fit 哈希 + activity id + 时间戳" 三字段 | 九字段（加 duration / start_lat / start_lng / status / synced_at） | 模糊去重和增量要一张表服务两种读；status 列撑起差异化查询，避免建第二张表 |
+| 模糊去重位置 | 未明确 | **在 `fix_fit` 之前**，用 raw（GCJ-02 帧）fit 的坐标查 | 命中时跳过 fix + 磁盘写；backfill 读的也是 raw 文件，帧一致；500m 阈值对 300m 的 GCJ 偏差有余量 |
+| `--incremental` 默认 | 未明确 | **保守：保留 `--n 1` 默认**，`--incremental` 是 opt-in | Phase 2 用户已习惯"最新 1 条"默认；突然变"拉全部新"可能惊到老用户 |
+| Cookie 续期 | 本阶段要做 | **延后到 Phase 3.2** | 需要先积累"真实过期频率"数据；WebView 方案的安装摩擦账强依赖这个输入 |
+
+#### 交付证据
+- ✅ `uv run pytest` 72 个测试全绿（Phase 1/2 的 41 + Phase 3.1 的 31）。
+- ✅ 零新增第三方依赖（`sqlite3` 在 stdlib；Haversine 复用 Phase 1 已有实现）。`pyproject.toml` 不改，`uv sync` 速度不退化。
+- ✅ 连跑两次 `sync --incremental`，第二次输出 "No new activities since last sync." 且 `strava.upload_activity` / `get_activities` 零调用（测试 `test_incremental_skips_already_seen_activities` 断言）。
+- ✅ 模拟 `ConnectionError` 两次后恢复：第三次成功并 `status=ok`；全程失败时日志 `status=failed` 等待下次重试。
+- ✅ 决策沉淀：[contexts/phase3.1-dedupe-and-resilience.md](../contexts/phase3.1-dedupe-and-resilience.md)。
+
+### Phase 3.2 📋：Cookie 续期（待评估）
+
+#### 仍然有效的约束
+- **不走** `browser-cookie3`（Phase 2 v3 已证伪 ABE 的不可靠性）。
+- 所有路径都要对 Phase 3.1 已有的 L3 live probe（Cookie 写入时对 `/analysis/list` 打一次）**兼容**——它仍然是 Cookie 有效性的唯一权威裁判。
+
+#### 评估前要先拿到的数据
+- Cookie 真实过期频率（Phase 3.1 运行 2-4 周后有日志可查）。
+- 用户对"多装一次 Chromium / WebView2 runtime"vs "每 N 天手粘一次"的偏好。
+
+#### 候选路径（待评估）
+1. **嵌入 WebView**（`pywebview` / Playwright 的 `storage_state`）：让 `sync` 发现过期时弹一个迷你浏览器窗口复用已登录 session。规避 ABE 边界（DPAPI 密钥不在我们手里），但要拖进非轻量二进制。
+2. **顽鹿官方 refresh 接口**（若抓包确认存在）：最轻量。但要求一手验证，不复用二手博客（继承 Phase 2 §2.2 原则）。
+3. **不做**：如果实测过期频率低到周级别以上，手粘 10 秒的现状可能就是最优解。
+
+### 本阶段不做（保留到后续）
 - 跨设备状态同步。
 - Web UI。
 - 顽鹿历史全量同步（只做"自上次以来的新骑行"，做"从零到今"要另开一轮，顽鹿是否支持分页仍待确认）。

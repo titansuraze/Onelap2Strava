@@ -37,6 +37,9 @@ data/.strava_token.json
 data/.onelap_cookies.json
 data/.onelap_sync.json
 data/*.json
+data/.sync.db
+data/*.db
+data/*.db-journal
 
 # Test cache
 .pytest_cache/

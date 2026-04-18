@@ -37,6 +37,7 @@ from .onelap.client import OnelapAuthRequired, OnelapError
 from .strava_auth import DEFAULT_TOKEN_PATH, StravaCredentials, authorize, get_authenticated_client
 from .strava_client import upload_fit
 from .sync import DEFAULT_CACHE_DIR, run_sync
+from .sync_log import DEFAULT_DB_PATH, SyncLog
 
 app = typer.Typer(
     help="Onelap -> Strava: fix GCJ-02 biased fit files and upload to Strava.",
@@ -256,16 +257,47 @@ def onelap_list(
 @app.command()
 def sync(
     n: int = typer.Option(1, "--n", "-n", help="Number of most recent activities to sync."),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        help=(
+            "Pull all activities newer than the last successful sync "
+            "(based on the local sync log). Mutually exclusive with --n."
+        ),
+    ),
     force: bool = typer.Option(
-        False, "--force", help="Skip the local time-window duplicate check on Strava."
+        False,
+        "--force",
+        help="Skip the local fuzzy dedup AND Strava's ±10min duplicate check.",
     ),
     name: str | None = typer.Option(
         None, "--name", help="Override the Strava activity name (applies to every synced fit)."
     ),
 ) -> None:
-    """Pull the latest Onelap activities and upload them to Strava end-to-end."""
+    """Pull the latest Onelap activities and upload them to Strava end-to-end.
+
+    Local sync log at ``data/.sync.db`` records every handled activity
+    so repeated runs do not re-upload rides that were already synced
+    (even if they got re-exported with slightly different bytes).
+    """
+    # `--n` has a non-sentinel default (1), so we use `incremental`
+    # explicitly rather than "n was passed" to disambiguate intent.
+    if incremental and n != 1:
+        typer.echo(
+            "[error] --incremental and --n are mutually exclusive; "
+            "--incremental always pulls everything new.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     try:
-        report = run_sync(limit=n, force=force, name=name, cache_dir=DEFAULT_CACHE_DIR)
+        report = run_sync(
+            limit=n,
+            force=force,
+            name=name,
+            incremental=incremental,
+            cache_dir=DEFAULT_CACHE_DIR,
+        )
     except NotAuthenticatedError as e:
         typer.echo(f"[error] {e}", err=True)
         raise typer.Exit(code=1)
@@ -274,7 +306,10 @@ def sync(
         raise typer.Exit(code=1)
 
     if not report.results:
-        typer.echo("No activities on Onelap to sync.")
+        if incremental:
+            typer.echo("No new activities since last sync.")
+        else:
+            typer.echo("No activities on Onelap to sync.")
         return
 
     for r in report.results:
@@ -286,6 +321,35 @@ def sync(
     )
     if report.failure_count:
         raise typer.Exit(code=1)
+
+
+@app.command(name="sync-log")
+def sync_log_cmd(
+    n: int = typer.Option(20, "--n", "-n", help="How many recent rows to display."),
+) -> None:
+    """Show the most recent rows from the local sync log (debug / audit).
+
+    Useful to answer "did my last sync actually touch Strava?" or
+    "which activities were skipped as duplicates?". The log lives at
+    ``data/.sync.db``; deleting that file resets the state (the next
+    ``sync`` will backfill from ``data/cache/`` if present).
+    """
+    if not DEFAULT_DB_PATH.exists():
+        typer.echo(f"No sync log yet. Run `sync` first (expected at {DEFAULT_DB_PATH}).")
+        return
+    with SyncLog.open(DEFAULT_DB_PATH) as log:
+        rows = log.recent(limit=n)
+    if not rows:
+        typer.echo("Sync log is empty.")
+        return
+    for row in rows:
+        start = row.start_time_utc.astimezone().strftime("%Y-%m-%d %H:%M")
+        strava = f"strava={row.strava_activity_id}" if row.strava_activity_id else ""
+        typer.echo(
+            f"  {row.synced_at.astimezone().strftime('%Y-%m-%d %H:%M')} "
+            f"status={row.status:<10} start={start} "
+            f"onelap={row.onelap_activity_id} {strava}"
+        )
 
 
 @app.command(name="token-info")

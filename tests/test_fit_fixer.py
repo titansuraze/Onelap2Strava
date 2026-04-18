@@ -33,7 +33,7 @@ from fit_tool.fit_file import FitFile
 from fit_tool.profile.messages.record_message import RecordMessage
 
 from onelap2strava.coords import haversine_m
-from onelap2strava.fit_fixer import fix_fit
+from onelap2strava.fit_fixer import fix_fit, read_fit_metadata
 
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "test_data"
 BIAS_FIT = FIXTURE_DIR / "MAGENE_C506_bias.fit"
@@ -206,6 +206,22 @@ def test_distance_distribution_drops_to_gps_noise_scale(summaries):
         f"fixed P50 distance is {f['p50_distance_m']:.1f}m; expected < 80m "
         f"(GPS noise + lane differences scale)"
     )
+
+
+def test_read_fit_metadata_on_real_fixture():
+    """Phase 3.1: the sync log seeds itself from fits like this one.
+
+    We only assert basic shape here — exact values would tie us to the
+    private fixture that's not in version control.
+    """
+    meta = read_fit_metadata(BIAS_FIT)
+    assert meta.fit_sha1 and len(meta.fit_sha1) == 40
+    assert meta.start_time_utc is not None
+    assert meta.start_time_utc.tzinfo is not None
+    # A real ride has non-trivial duration and valid coordinates.
+    assert meta.duration_s is None or meta.duration_s > 60
+    assert meta.start_lat is not None and -90 < meta.start_lat < 90
+    assert meta.start_lng is not None and -180 < meta.start_lng < 180
 
 
 def test_print_summary(summaries, capsys):
