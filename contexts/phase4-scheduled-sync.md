@@ -53,7 +53,7 @@ uv run onelap2strava sync --incremental
 
 若 `uv` 不在系统 PATH 中，把 `uv run` 换成 `uv` 可执行文件的完整路径（在资源管理器或 `where uv` 中确认）。
 
-## 5. Linux：cron
+## 5. Unix：cron（Linux / macOS）
 
 在 `crontab -e` 中增加一行（路径按本机修改）：
 
@@ -64,6 +64,10 @@ uv run onelap2strava sync --incremental
 - 上例表示：每 4 小时、在每小时的第 15 分执行（示例；请按需要改五段式）。
 - **务必**在命令前 `cd` 到项目根，否则相对路径会错。
 - `uv` 路径可用 `which uv` 查询。
+
+### macOS（可选）
+
+与上相同，可用 `crontab -e`；或用 **launchd**：在 `~/Library/LaunchAgents/` 放置 plist，`ProgramArguments` 里使用项目根的绝对路径调用 `uv run`（launchd 不保证默认工作目录即仓库根，建议在参数里显式 `cd` 或把 `WorkingDirectory` 键设为项目根）。调度可用 `StartCalendarInterval`（类日历触发）或 `StartInterval`（固定间隔秒数）。说明见 Apple 文档 *Creating Launch Daemons and Agents*。
 
 ## 6. Linux：systemd 用户定时器（可选）
 
