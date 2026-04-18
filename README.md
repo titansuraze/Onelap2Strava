@@ -98,30 +98,13 @@ uv run onelap2strava sync --incremental   # 自上次以来所有新骑行（推
 uv run onelap2strava sync --force         # 跳过所有去重，强制上传
 ```
 
-### 5. 定时自动同步（可选）
-
-希望电脑在固定时刻或固定间隔自动跑**与上面相同的增量同步**，核心命令仍是：
+### 5. 定时自动同步
 
 ```bash
-uv run onelap2strava sync --incremental
-```
-
-「每隔多久、每天几点」由**系统调度**表达（不是 `sync` 的子参数）。推荐用 CLI 注册（内部调用 `batchfiles/` 下同名脚本）：
-
-```bash
-uv run onelap2strava auto-sync install --mode hourly --every 4    # 每 4 小时
+uv run onelap2strava auto-sync install --mode hourly --every 4      # 每 4 小时
 uv run onelap2strava auto-sync install --mode daily --at 22:00      # 每天 22:00
 uv run onelap2strava auto-sync uninstall                            # 移除
 ```
-
-也可直接运行 [`batchfiles/`](batchfiles/) 中的脚本（或编辑脚本内默认值后双击 / 执行）：
-
-| 系统 | 一次性执行 | 注册定时任务 |
-| --- | --- | --- |
-| Windows | `batchfiles\run-incremental-sync.cmd` | `batchfiles\install-scheduled-sync-windows.cmd`（支持参数 `hourly N` / `daily HH:mm`，或 `uninstall`） |
-| Linux / macOS | `chmod +x batchfiles/run-incremental-sync.sh` 后 `./batchfiles/run-incremental-sync.sh` | `./batchfiles/install-scheduled-sync-unix.sh`（同上参数，`--remove` 移除 crontab 条目） |
-
-手动配置任务计划 / `cron` 的说明、退出码与排障见 [contexts/phase4-scheduled-sync.md](contexts/phase4-scheduled-sync.md)。
 
 ## 其他命令
 
@@ -243,7 +226,7 @@ Onelap2Strava/
 │   ├── phase2-onelap-api.md                # 顽鹿接口清单 + 侦察指引
 │   ├── phase2-onelap-scraping.md           # Phase 2 决策演进（含 --from-browser 的退场）
 │   ├── phase3.1-dedupe-and-resilience.md   # Phase 3.1 决策演进（SQLite / 模糊去重 / 重试 / 增量）
-│   └── phase4-scheduled-sync.md            # Phase 4 定时同步（系统任务计划 + sync --incremental）
+│   └── phase4-scheduled-sync.md            # Phase 4：会话归纳 + 定时同步操作说明
 ├── src/onelap2strava/
 │   ├── coords.py           # GCJ-02 ↔ WGS-84 互转 + Haversine
 │   ├── fit_fixer.py        # Fit 读取 / 坐标修正 / 写回 + read_fit_metadata
