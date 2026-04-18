@@ -1,7 +1,7 @@
 # batchfiles
 
-与**定时增量同步**相关的 Windows 批处理与 Unix shell：注册系统计划任务或 `crontab`，实际仍执行仓库根目录下的 `uv run onelap2strava sync --incremental`。
+Windows batch and Unix shell helpers for **scheduled incremental sync**: register a task or `crontab` line that runs `uv run onelap2strava sync --incremental` from the repository root.
 
-推荐从仓库根用 **`uv run onelap2strava auto-sync install`**（参数 `--mode` / `--every` / `--at`），内部会调用本目录脚本。亦可直接运行 `install-scheduled-sync-*.cmd` / `.sh`。
+Prefer **`uv run onelap2strava auto-sync install`** from the repo root (`--mode` / `--every` / `--at`); it delegates to scripts in this folder. You can also run `install-scheduled-sync-*.cmd` / `.sh` directly.
 
-使用说明见主 [README.md](../README.md)「定时自动同步」与 [contexts/phase4-scheduled-sync.md](../contexts/phase4-scheduled-sync.md)。
+See the main [README.md](../README.md) (scheduled sync) and [contexts/phase4-scheduled-sync.md](../contexts/phase4-scheduled-sync.md).
