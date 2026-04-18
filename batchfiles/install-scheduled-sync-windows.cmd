@@ -7,7 +7,7 @@ if /i "%~1"=="remove" goto :uninstall
 
 REM =============================================================================
 REM 用户配置：按需修改后，在资源管理器中双击本文件，或在「以管理员身份运行」的
-REM cmd 中执行：install-scheduled-sync-windows.cmd
+REM cmd 中执行：batchfiles\install-scheduled-sync-windows.cmd
 REM
 REM SYNC_MODE=hourly  — 每 HOURLY_INTERVAL 小时运行一次（整点起算，与任务计划「按间隔」一致）
 REM SYNC_MODE=daily   — 每天在 DAILY_TIME 运行一次（24 小时制 HH:mm）
@@ -50,7 +50,7 @@ if /i "%SYNC_MODE%"=="hourly" (
 )
 
 echo [ok] 计划任务已注册。查看：schtasks /query /tn "%TASK_NAME%" /v /fo LIST
-echo      卸载：install-scheduled-sync-windows.cmd uninstall
+echo      卸载：batchfiles\install-scheduled-sync-windows.cmd uninstall
 exit /b 0
 
 :uninstall

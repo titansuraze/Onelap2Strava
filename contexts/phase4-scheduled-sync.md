@@ -13,16 +13,16 @@ uv run onelap2strava sync --incremental
 - **`--incremental`**：只处理「自上次成功同步以来」在顽鹿侧出现的新骑行（依赖 `data/.sync.db`），可安全重复执行。
 - **「每隔多久 / 每天几点跑」**：由**操作系统调度器**配置，**不是**本 CLI 的子参数（避免与一次性 `sync` 进程语义重复，也不引入常驻进程）。
 
-### 仓库根目录的便捷脚本（可选）
+### `batchfiles/` 便捷脚本（可选）
 
-若不想在图形界面里逐字段配置，可使用仓库根目录下的脚本——它们**只负责注册系统调度**，实际执行的仍是 `uv run onelap2strava sync --incremental`：
+若不想在图形界面里逐字段配置，可使用 [`batchfiles/`](../batchfiles/) 下的脚本——它们**只负责注册系统调度**，实际执行的仍是 `uv run onelap2strava sync --incremental`（工作目录为**仓库根**，脚本内已 `cd` 上一级）：
 
 | 文件 | 作用 |
 | --- | --- |
-| `run-incremental-sync.cmd` | Windows：单次同步；计划任务应指向此文件（脚本内 `cd` 到仓库根）。 |
-| `install-scheduled-sync-windows.cmd` | Windows：编辑脚本顶部的 `SYNC_MODE`（`hourly` 每 N 小时 / `daily` 每天固定时刻）、`HOURLY_INTERVAL`、`DAILY_TIME`，运行一次即可 `schtasks /create`。`install-scheduled-sync-windows.cmd uninstall` 删除同名任务。 |
-| `run-incremental-sync.sh` | Linux/macOS：单次同步（需本机已安装 `uv` 且在非 cron 环境下能解析 PATH）。 |
-| `install-scheduled-sync-unix.sh` | Linux/macOS：编辑脚本内变量（或 `SYNC_MODE=daily DAILY_AT=07:30 ./install-scheduled-sync-unix.sh`）写入当前用户 crontab；默认日志 `data/sync-cron.log`。`--remove` 移除本脚本写入的条目。 |
+| `batchfiles/run-incremental-sync.cmd` | Windows：单次同步；计划任务应指向此文件。 |
+| `batchfiles/install-scheduled-sync-windows.cmd` | Windows：编辑脚本顶部的 `SYNC_MODE`（`hourly` 每 N 小时 / `daily` 每天固定时刻）、`HOURLY_INTERVAL`、`DAILY_TIME`，运行一次即可 `schtasks /create`。`batchfiles\install-scheduled-sync-windows.cmd uninstall` 删除同名任务。 |
+| `batchfiles/run-incremental-sync.sh` | Linux/macOS：单次同步（需本机已安装 `uv` 且在非 cron 环境下能解析 PATH）。 |
+| `batchfiles/install-scheduled-sync-unix.sh` | Linux/macOS：编辑脚本内变量（或 `SYNC_MODE=daily DAILY_AT=07:30 ./batchfiles/install-scheduled-sync-unix.sh`）写入当前用户 crontab；默认日志 `data/sync-cron.log`。`--remove` 移除本脚本写入的条目。 |
 
 仍可直接按下面各节**手动**配置任务计划、`cron` 或 systemd，与使用便捷脚本二选一即可。
 

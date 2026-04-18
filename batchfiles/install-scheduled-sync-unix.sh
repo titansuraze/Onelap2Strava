@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # 向当前用户的 crontab 注册一条「增量同步」任务（Linux / macOS）。
-# 用法：
-#   ./install-scheduled-sync-unix.sh           # 按下方变量安装/覆盖本仓库对应条目
-#   ./install-scheduled-sync-unix.sh --remove  # 移除本脚本写入的 crontab 条目
+# 用法（在仓库根目录执行）：
+#   ./batchfiles/install-scheduled-sync-unix.sh
+#   ./batchfiles/install-scheduled-sync-unix.sh --remove
 #
 # 也可在安装前通过环境变量覆盖（无需改文件）：
-#   SYNC_MODE=daily DAILY_AT=07:30 ./install-scheduled-sync-unix.sh
+#   SYNC_MODE=daily DAILY_AT=07:30 ./batchfiles/install-scheduled-sync-unix.sh
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TAG="#onelap2strava-scheduled-sync"
 
 # =============================================================================
