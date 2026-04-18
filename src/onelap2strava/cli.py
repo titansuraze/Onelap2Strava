@@ -2,8 +2,9 @@
 
 Strava-side commands:
 
-- ``auth``        : first-time authorize / refresh Strava token.
-- ``token-info``  : inspect on-disk Strava token status (debug aid).
+- ``strava-configure`` : interactively write ``.env`` with Strava App credentials.
+- ``auth``             : first-time authorize / refresh Strava token.
+- ``token-info``       : inspect on-disk Strava token status (debug aid).
 
 Local-file commands:
 
@@ -34,7 +35,13 @@ from .onelap.auth import (
     save_cookies_from_string,
 )
 from .onelap.client import OnelapAuthRequired, OnelapError
-from .strava_auth import DEFAULT_TOKEN_PATH, StravaCredentials, authorize, get_authenticated_client
+from .strava_auth import (
+    DEFAULT_REDIRECT_URI,
+    DEFAULT_TOKEN_PATH,
+    StravaCredentials,
+    authorize,
+    get_authenticated_client,
+)
 from .strava_client import upload_fit
 from .sync import DEFAULT_CACHE_DIR, run_sync
 from .sync_log import DEFAULT_DB_PATH, SyncLog
@@ -57,6 +64,230 @@ def _main(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
 ) -> None:
     _setup_logging(verbose)
+
+
+DEFAULT_ENV_PATH = Path(".env")
+
+# Strava's official OAuth token endpoint. Note the /api/v3/ prefix — the
+# short /oauth/token URL shown in older docs only serves user-facing HTML.
+STRAVA_TOKEN_ENDPOINT = "https://www.strava.com/api/v3/oauth/token"
+
+
+def _verify_strava_credentials(client_id: str, client_secret: str) -> tuple[bool, str]:
+    """Probe the Strava token endpoint to confirm the Client ID / Secret pair
+    is registered, *without* requiring the user to complete an OAuth flow.
+
+    Trick: submit a deliberately-bogus ``code`` and read Strava's structured
+    error response. Strava tells us *which* field it disliked:
+
+    - ``field=client_id`` / ``field=client_secret`` -> the pair is bad.
+    - ``resource=AuthorizationCode`` / ``field=code`` -> the pair is good,
+      only our fake code was rejected — which is exactly the happy path.
+
+    Returns ``(ok, message)``. ``ok=False`` is also produced for network
+    failures and unparseable responses; callers can surface those or let
+    ``--skip-verify`` bypass entirely.
+    """
+    import requests
+
+    try:
+        resp = requests.post(
+            STRAVA_TOKEN_ENDPOINT,
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": "onelap2strava-probe",
+                "grant_type": "authorization_code",
+            },
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        return False, (
+            f"could not reach Strava to verify credentials ({e}). "
+            "Pass --skip-verify to write anyway."
+        )
+
+    # A successful token issuance from a probe code shouldn't happen; treat
+    # it as "Strava is evidently happy" rather than surprising the user.
+    if resp.ok:
+        return True, "credentials accepted (probe unexpectedly issued a token)."
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        return False, (
+            f"unexpected Strava response ({resp.status_code}): {resp.text[:200]}"
+        )
+
+    errors = payload.get("errors") or []
+    for err in errors:
+        field = str(err.get("field", "")).lower()
+        if field == "client_id":
+            return False, "Strava rejected the Client ID (not a registered App ID)."
+        if field == "client_secret":
+            return False, (
+                "Strava rejected the Client Secret (doesn't match this Client ID)."
+            )
+
+    for err in errors:
+        resource = str(err.get("resource", ""))
+        field = str(err.get("field", "")).lower()
+        if resource == "AuthorizationCode" or field == "code":
+            return True, "credentials accepted by Strava."
+
+    return False, f"unexpected Strava response: {payload}"
+
+
+def _merge_env_file(env_file: Path, values: dict[str, str]) -> bool:
+    """Create or update ``env_file`` with the given KEY=VALUE pairs in place.
+
+    If the file already exists, keys in ``values`` are replaced on the
+    lines where they currently live (preserving ordering, comments,
+    blank lines, and any unrelated keys). Missing keys are appended.
+
+    Returns whether the file previously existed.
+    """
+    existed = env_file.exists()
+    if existed:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = [
+            "# Strava API credentials",
+            "# Get them from https://www.strava.com/settings/api",
+        ]
+
+    seen: set[str] = set()
+    merged: list[str] = []
+    for line in lines:
+        replaced = False
+        for key, val in values.items():
+            # Match strict KEY=... form; don't touch lines like `export KEY=`
+            # or `# KEY=...` so we never clobber something we don't understand.
+            if line.startswith(f"{key}="):
+                merged.append(f"{key}={val}")
+                seen.add(key)
+                replaced = True
+                break
+        if not replaced:
+            merged.append(line)
+
+    for key, val in values.items():
+        if key not in seen:
+            merged.append(f"{key}={val}")
+
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text("\n".join(merged) + "\n", encoding="utf-8")
+    return existed
+
+
+@app.command(name="strava-configure")
+def strava_configure(
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help="Strava App Client ID (numeric). If omitted, you'll be prompted.",
+    ),
+    client_secret: str | None = typer.Option(
+        None,
+        "--client-secret",
+        help=(
+            "Strava App Client Secret. If omitted, you'll be prompted "
+            "interactively (terminal hides the input)."
+        ),
+    ),
+    redirect_uri: str = typer.Option(
+        DEFAULT_REDIRECT_URI,
+        "--redirect-uri",
+        help="OAuth callback URI (must match your Strava App's Authorization Callback Domain).",
+    ),
+    env_file: Path = typer.Option(
+        DEFAULT_ENV_PATH,
+        "--env-file",
+        help="Where to write the .env file.",
+    ),
+    skip_verify: bool = typer.Option(
+        False,
+        "--skip-verify",
+        help=(
+            "Skip the live Strava probe that confirms the Client ID / Secret "
+            "pair is registered. Useful for offline setup or CI."
+        ),
+    ),
+) -> None:
+    """Write Strava OAuth credentials to a local ``.env`` file.
+
+    Mirrors ``onelap-login``: one interactive command replaces the
+    "create a file and fill in two lines" setup step. If ``.env``
+    already exists, only the three ``STRAVA_*`` keys are updated
+    in place — other keys, comments, and blank lines are preserved.
+
+    Before writing, the command makes a live probe against Strava's
+    token endpoint with a bogus ``code`` to confirm the Client ID /
+    Secret pair is actually registered; if Strava rejects the pair,
+    the command aborts **without touching** ``.env`` so an existing
+    good config is never clobbered by a typo. Pass ``--skip-verify``
+    to bypass the probe (offline setup / CI).
+
+    **Where to get Client ID / Secret:**
+
+    Go to https://www.strava.com/settings/api and create an App
+    (Category: Data Importer, Website: any reachable URL,
+    **Authorization Callback Domain: localhost**). The page then
+    shows your Client ID and Client Secret.
+
+    After this command succeeds, run ``onelap2strava auth`` to
+    complete OAuth.
+    """
+    if client_id is None:
+        client_id = typer.prompt("Strava Client ID")
+    client_id = client_id.strip()
+    try:
+        int(client_id)
+    except ValueError:
+        typer.echo(
+            f"[error] Client ID must be an integer, got {client_id!r}.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if client_secret is None:
+        client_secret = typer.prompt("Strava Client Secret", hide_input=True)
+    client_secret = client_secret.strip()
+    if not client_secret:
+        typer.echo("[error] Client Secret must not be empty.", err=True)
+        raise typer.Exit(code=1)
+
+    # Verify BEFORE writing: if the probe fails we don't want to have
+    # already overwritten a previously-working set of STRAVA_* lines in
+    # the user's .env with bad values.
+    if not skip_verify:
+        typer.echo("Verifying credentials with Strava...")
+        ok, msg = _verify_strava_credentials(client_id, client_secret)
+        if ok:
+            typer.echo(f"[ok]    {msg}")
+        else:
+            typer.echo(f"[error] {msg}", err=True)
+            typer.echo(
+                "No changes written. Double-check Client ID / Secret at "
+                "https://www.strava.com/settings/api and re-run. "
+                "Pass --skip-verify to write anyway.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    existed = _merge_env_file(
+        env_file,
+        {
+            "STRAVA_CLIENT_ID": client_id,
+            "STRAVA_CLIENT_SECRET": client_secret,
+            "STRAVA_REDIRECT_URI": redirect_uri,
+        },
+    )
+    verb = "Updated" if existed else "Created"
+    typer.echo(
+        f"{verb} {env_file} (STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET / STRAVA_REDIRECT_URI)."
+    )
+    typer.echo("Next step: `uv run onelap2strava auth` to authorize Strava.")
 
 
 @app.command()

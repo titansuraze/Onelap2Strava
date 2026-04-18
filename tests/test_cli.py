@@ -11,9 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest import mock
 
+import responses
 from typer.testing import CliRunner
 
-from onelap2strava.cli import app
+from onelap2strava.cli import STRAVA_TOKEN_ENDPOINT, app
 
 
 runner = CliRunner()
@@ -84,6 +85,332 @@ def test_sync_with_default_n_invokes_run_sync(monkeypatch) -> None:
     assert called["limit"] == 1
     assert called["incremental"] is False
     assert called["force"] is False
+
+
+# ---------------------------------------------------------------------------
+# strava-configure: file-behavior tests (use --skip-verify to avoid the probe)
+# ---------------------------------------------------------------------------
+
+
+def test_strava_configure_non_interactive_writes_env(tmp_path: Path) -> None:
+    """With --client-id / --client-secret given, no prompt is needed and .env is written."""
+    env_path = tmp_path / ".env"
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "12345",
+            "--client-secret",
+            "supersecret",
+            "--env-file",
+            str(env_path),
+            "--skip-verify",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert env_path.exists()
+    content = env_path.read_text(encoding="utf-8")
+    assert "STRAVA_CLIENT_ID=12345" in content
+    assert "STRAVA_CLIENT_SECRET=supersecret" in content
+    assert "STRAVA_REDIRECT_URI=http://localhost:8000/callback" in content
+    assert "Created" in result.stdout
+    assert str(env_path) in result.stdout
+    # --skip-verify should suppress the probe message entirely.
+    assert "Verifying" not in result.stdout
+
+
+def test_strava_configure_interactive_prompts(tmp_path: Path) -> None:
+    """Without flags, the command prompts for both values (secret hidden)."""
+    env_path = tmp_path / ".env"
+    result = runner.invoke(
+        app,
+        ["strava-configure", "--env-file", str(env_path), "--skip-verify"],
+        input="67890\nanothersecret\n",
+    )
+    assert result.exit_code == 0, result.stdout
+    content = env_path.read_text(encoding="utf-8")
+    assert "STRAVA_CLIENT_ID=67890" in content
+    assert "STRAVA_CLIENT_SECRET=anothersecret" in content
+
+
+def test_strava_configure_rejects_non_integer_client_id(tmp_path: Path) -> None:
+    """Client ID must parse as int; otherwise exit 1 without writing.
+
+    This check fires before the Strava probe, so no --skip-verify needed.
+    """
+    env_path = tmp_path / ".env"
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "not-a-number",
+            "--client-secret",
+            "x",
+            "--env-file",
+            str(env_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "must be an integer" in (result.stdout + (result.stderr or ""))
+    assert not env_path.exists()
+
+
+def test_strava_configure_merges_existing_env(tmp_path: Path) -> None:
+    """Re-running against an existing .env updates the STRAVA_* keys in place
+    while preserving ordering, comments, and any unrelated keys the user added.
+    """
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "# my custom header\n"
+        "STRAVA_CLIENT_ID=old\n"
+        "STRAVA_CLIENT_SECRET=oldsecret\n"
+        "STRAVA_REDIRECT_URI=http://localhost:8000/callback\n"
+        "CUSTOM_KEY=keep-me\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "99",
+            "--client-secret",
+            "newsecret",
+            "--env-file",
+            str(env_path),
+            "--skip-verify",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Updated" in result.stdout
+
+    content = env_path.read_text(encoding="utf-8")
+    assert "# my custom header" in content
+    assert "STRAVA_CLIENT_ID=99" in content
+    assert "STRAVA_CLIENT_SECRET=newsecret" in content
+    assert "CUSTOM_KEY=keep-me" in content
+    assert "old" not in content
+    assert "oldsecret" not in content
+    # Ordering: CUSTOM_KEY stays after the STRAVA_* block as it was written.
+    assert content.index("STRAVA_CLIENT_ID=99") < content.index("CUSTOM_KEY=keep-me")
+
+
+def test_strava_configure_appends_missing_keys(tmp_path: Path) -> None:
+    """If .env has only some STRAVA_* keys, the missing ones are appended."""
+    env_path = tmp_path / ".env"
+    env_path.write_text("OTHER=1\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "42",
+            "--client-secret",
+            "sec",
+            "--env-file",
+            str(env_path),
+            "--skip-verify",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    content = env_path.read_text(encoding="utf-8")
+    assert "OTHER=1" in content
+    assert "STRAVA_CLIENT_ID=42" in content
+    assert "STRAVA_CLIENT_SECRET=sec" in content
+    assert "STRAVA_REDIRECT_URI=http://localhost:8000/callback" in content
+
+
+def test_strava_configure_reports_created_vs_updated(tmp_path: Path) -> None:
+    """Output should say 'Created' on first run, 'Updated' on re-run."""
+    env_path = tmp_path / ".env"
+    first = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "1",
+            "--client-secret",
+            "a",
+            "--env-file",
+            str(env_path),
+            "--skip-verify",
+        ],
+    )
+    assert first.exit_code == 0
+    assert "Created" in first.stdout
+
+    second = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "2",
+            "--client-secret",
+            "b",
+            "--env-file",
+            str(env_path),
+            "--skip-verify",
+        ],
+    )
+    assert second.exit_code == 0
+    assert "Updated" in second.stdout
+
+
+# ---------------------------------------------------------------------------
+# strava-configure: live Strava probe tests (use responses to mock HTTP)
+# ---------------------------------------------------------------------------
+
+
+@responses.activate
+def test_strava_configure_probe_accepts_valid_credentials(tmp_path: Path) -> None:
+    """When Strava rejects only the (fake) probe *code*, credentials are good
+    and the .env gets written.
+    """
+    responses.add(
+        responses.POST,
+        STRAVA_TOKEN_ENDPOINT,
+        json={
+            "message": "Bad Request",
+            "errors": [
+                {"resource": "AuthorizationCode", "field": "code", "code": "invalid"}
+            ],
+        },
+        status=400,
+    )
+
+    env_path = tmp_path / ".env"
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "42",
+            "--client-secret",
+            "goodsecret",
+            "--env-file",
+            str(env_path),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Verifying credentials with Strava" in result.stdout
+    assert "credentials accepted by Strava" in result.stdout
+    assert env_path.exists()
+    assert "STRAVA_CLIENT_ID=42" in env_path.read_text(encoding="utf-8")
+
+
+@responses.activate
+def test_strava_configure_probe_rejects_bad_client_id(tmp_path: Path) -> None:
+    """A client_id-field error aborts without writing anything."""
+    responses.add(
+        responses.POST,
+        STRAVA_TOKEN_ENDPOINT,
+        json={
+            "message": "Bad Request",
+            "errors": [
+                {"resource": "Application", "field": "client_id", "code": "invalid"}
+            ],
+        },
+        status=400,
+    )
+
+    env_path = tmp_path / ".env"
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "999999999",
+            "--client-secret",
+            "anything",
+            "--env-file",
+            str(env_path),
+        ],
+    )
+    assert result.exit_code == 1
+    combined = result.stdout + (result.stderr or "")
+    assert "rejected the Client ID" in combined
+    assert "No changes written" in combined
+    assert not env_path.exists()
+
+
+@responses.activate
+def test_strava_configure_probe_rejects_bad_client_secret(tmp_path: Path) -> None:
+    """A client_secret-field error aborts without touching an existing .env."""
+    responses.add(
+        responses.POST,
+        STRAVA_TOKEN_ENDPOINT,
+        json={
+            "message": "Bad Request",
+            "errors": [
+                {"resource": "Application", "field": "client_secret", "code": "invalid"}
+            ],
+        },
+        status=400,
+    )
+
+    env_path = tmp_path / ".env"
+    previous = (
+        "STRAVA_CLIENT_ID=11\n"
+        "STRAVA_CLIENT_SECRET=still-good\n"
+        "STRAVA_REDIRECT_URI=http://localhost:8000/callback\n"
+    )
+    env_path.write_text(previous, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "11",
+            "--client-secret",
+            "wrong-new-secret",
+            "--env-file",
+            str(env_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "rejected the Client Secret" in (result.stdout + (result.stderr or ""))
+    # Critical: the previously-valid .env must not have been clobbered.
+    assert env_path.read_text(encoding="utf-8") == previous
+
+
+@responses.activate
+def test_strava_configure_probe_network_failure_surfaces_skip_hint(
+    tmp_path: Path,
+) -> None:
+    """If the probe can't even reach Strava, we fail loudly but point at
+    --skip-verify so the user isn't stuck.
+    """
+    import requests
+
+    responses.add(
+        responses.POST,
+        STRAVA_TOKEN_ENDPOINT,
+        body=requests.ConnectionError("simulated network down"),
+    )
+
+    env_path = tmp_path / ".env"
+    result = runner.invoke(
+        app,
+        [
+            "strava-configure",
+            "--client-id",
+            "1",
+            "--client-secret",
+            "s",
+            "--env-file",
+            str(env_path),
+        ],
+    )
+    assert result.exit_code == 1
+    combined = result.stdout + (result.stderr or "")
+    assert "could not reach Strava" in combined
+    assert "--skip-verify" in combined
+    assert not env_path.exists()
 
 
 def test_sync_incremental_flag_passes_through(monkeypatch) -> None:

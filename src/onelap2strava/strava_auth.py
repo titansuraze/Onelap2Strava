@@ -51,8 +51,9 @@ class StravaCredentials:
         if not client_id_raw or not client_secret:
             raise RuntimeError(
                 "STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET missing. "
-                "Copy .env.example to .env and fill in the values from "
-                "https://www.strava.com/settings/api."
+                "Run `uv run onelap2strava strava-configure` to set them "
+                "interactively (credentials come from "
+                "https://www.strava.com/settings/api)."
             )
         try:
             client_id = int(client_id_raw)
