@@ -115,32 +115,32 @@ def _validate_auto_sync_install(mode: str, every: int, at: str) -> None:
 def auto_sync(
     action: str = typer.Argument(
         ...,
-        help="install：注册系统定时任务；uninstall：移除。",
+        help="install: register OS scheduler; uninstall: remove it.",
     ),
     mode: str = typer.Option(
         "hourly",
         "--mode",
         "-m",
-        help="install 时：hourly（每 N 小时）或 daily（每天固定时刻）。",
+        help="For install: hourly (every N hours) or daily (fixed clock time).",
     ),
     every: int = typer.Option(
         4,
         "--every",
         "-e",
-        help="install 且 hourly：间隔小时数（1–23）。",
+        help="For install + hourly: interval in hours (1–23).",
     ),
     at: str = typer.Option(
         "22:00",
         "--at",
-        help="install 且 daily：每天运行时间（HH:MM）。",
+        help="For install + daily: time of day (HH:MM, 24h).",
     ),
     task_name: str | None = typer.Option(
         None,
         "--task-name",
-        help="仅 uninstall：Windows 计划任务名称（默认 Onelap2StravaIncrementalSync）。",
+        help="For uninstall on Windows only: scheduled task name (default: Onelap2StravaIncrementalSync).",
     ),
 ) -> None:
-    """调用 ``batchfiles/`` 下的脚本注册或移除定时增量同步（非 Python 内嵌调度）。"""
+    """Register or remove incremental sync via scripts in ``batchfiles/`` (not an in-process scheduler)."""
     act = action.strip().lower()
     if act not in ("install", "uninstall"):
         typer.echo(
