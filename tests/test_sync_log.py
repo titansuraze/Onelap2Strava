@@ -19,6 +19,7 @@ from onelap2strava.sync_log import (
     STATUS_BACKFILLED,
     STATUS_DUPLICATE,
     STATUS_FAILED,
+    STATUS_MANUAL,
     STATUS_OK,
     SyncLog,
 )
@@ -195,13 +196,24 @@ def test_fuzzy_match_includes_backfilled(tmp_path: Path) -> None:
 # ---------- seen ids (for --incremental) ----------
 
 
-def test_seen_onelap_ids_excludes_backfilled_and_failed(tmp_path: Path) -> None:
+def test_seen_onelap_ids_excludes_backfilled_and_failed_includes_manual(
+    tmp_path: Path,
+) -> None:
     with SyncLog.open(tmp_path / "x.db") as log:
         _record(log, onelap_id="real-1", status=STATUS_OK)
         _record(log, onelap_id="real-2", status=STATUS_DUPLICATE)
         _record(log, onelap_id="real-3", status=STATUS_FAILED)
+        _record(log, onelap_id="real-4", status=STATUS_MANUAL)
         _record(log, onelap_id="backfilled:xx.fit", status=STATUS_BACKFILLED)
-        assert log.seen_onelap_ids() == {"real-1", "real-2"}
+        assert log.seen_onelap_ids() == {"real-1", "real-2", "real-4"}
+
+
+def test_mark_onelap_manual_inserts_row(tmp_path: Path) -> None:
+    with SyncLog.open(tmp_path / "x.db") as log:
+        log.mark_onelap_manual("9")
+    with SyncLog.open(tmp_path / "x.db") as log:
+        assert "9" in log.seen_onelap_ids()
+        assert log.recent()[0].status == STATUS_MANUAL
 
 
 # ---------- backfill ----------

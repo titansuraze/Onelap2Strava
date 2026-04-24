@@ -482,6 +482,31 @@ def test_incremental_filters_out_seen_activities(
     assert report.results[0].activity.activity_id == "A3"
 
 
+def test_limit_mode_skips_manually_marked_activities(
+    tmp_path: Path, sync_log: SyncLog
+) -> None:
+    """--n 1 should take the next newest activity, not the latest if it is marked manual."""
+    a_skip = _fake_activity(
+        activity_id="skip-me", filename="a.fit", created_at=1_800_000_000
+    )
+    a2 = _fake_activity(
+        activity_id="next-one", filename="b.fit", created_at=1_712_500_000
+    )
+    onelap = _FakeOnelap([a_skip, a2], source_fit=BIAS_FIT)
+    strava = _strava_client_no_duplicates()
+    sync_log.mark_onelap_manual("skip-me")
+    report = run_sync(
+        limit=1,
+        cache_dir=tmp_path / "cache",
+        onelap=onelap,
+        strava=strava,
+        sync_log=sync_log,
+        sleep=_no_sleep,
+    )
+    assert len(report.results) == 1
+    assert report.results[0].activity.activity_id == "next-one"
+
+
 # ---------- Phase 3.1: backfill auto-trigger ----------
 
 

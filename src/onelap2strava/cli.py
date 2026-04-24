@@ -17,6 +17,7 @@ Onelap-pull commands:
 - ``onelap-login``: save Onelap session cookies (manual paste from DevTools).
 - ``onelap-list`` : show recent activities on Onelap (debug aid).
 - ``sync``        : pull latest Onelap activities and upload to Strava end-to-end.
+- ``mark-manual`` : record Onelap ids to skip in ``sync`` (e.g. you uploaded a local fit).
 - ``auto-sync``   : register/remove OS scheduled sync via ``batchfiles/`` scripts.
 """
 
@@ -518,41 +519,54 @@ def onelap_login(
             "If omitted, you'll be prompted interactively (terminal hides the input)."
         ),
     ),
+    bearer: str | None = typer.Option(
+        None,
+        "--bearer",
+        help=(
+            "Optional: Authorization JWT from the same request as fit download "
+            "(DevTools request headers, paste token only, without the word 'Bearer '). "
+            "If omitted, any existing token in data/.onelap_cookies.json is kept when updating cookies."
+        ),
+    ),
 ) -> None:
-    """Save Onelap session cookies for later use by ``sync``.
+    """Save Onelap session cookies (and optional JWT) for ``sync`` / ``onelap-list``.
 
-    **How to get the Cookie value:**
+    **1) Cookie（必填）** — 在已登录的 Chrome/Edge 中打开 **``https://u.onelap.cn/record``**，
+    按 F12 → **Network**，刷新。在 Filter 中输入 **``u.onelap``** 或 **``otm``**，点任意一条
+    **到 ``u.onelap.cn`` 的 XHR**（应返回 **JSON**；例如 ``ride_record``、``list`` 等）。
+    在 **Request Headers** 中复制整行 **``Cookie:``** 后的内容；若 OTM 接口仅含少量
+    站点 Cookie 但带 **Bearer** 能返回 JSON，**完整一行并非必须**（以 ``onelap-login`` 末尾 **[ok] 验证** 为准）。
 
-    1. Open http://u.onelap.cn/analysis/list in a logged-in Chrome / Edge
-       (the page should show a blob of JSON; if it redirects to a login
-       form, log in there first).
-    2. Press F12 to open DevTools -> Network tab -> press F5 to refresh.
-    3. In the Network list, click the request named ``list`` (the very
-       first entry, document type — it's the page itself).
-    4. In the right pane, open **Headers** -> **Request Headers** -> find
-       the line starting with ``Cookie:`` -> copy everything after the
-       colon, on a single line.
-    5. Paste at the prompt (input is hidden for privacy) or pass it via
-       ``--cookie "..."``.
+    **2) Bearer（常见为必填）** — 在同一条或另一条 **成功 200** 的 ``u.onelap.cn`` 请求上，
+    复制 **``Authorization:``** 里 **``Bearer `** 后面的一整段（不要写单词 ``Bearer``）。
+    交互模式下在粘贴 Cookie 后会再询问；也可用 ``--bearer "eyJ..."``。
 
-    The saved cookie is stored at ``data/.onelap_cookies.json`` and is
-    reused by ``sync`` / ``onelap-list`` until Onelap invalidates the
-    session (observed lifetime: several days to a week+). When it
-    expires the CLI surfaces a ``cookies likely expired`` message and
-    you re-run this command.
+    数据写入 ``data/.onelap_cookies.json``。仅重登 Cookie 时**不传** ``--bearer`` 会**保留**
+    已保存的 ``bearer``。若仍提示登录/HTML，先确认 Cookie 为**完整**一行，并加上 ``--bearer``。
 
-    See contexts/phase2-onelap-api.md for endpoint details and
-    contexts/phase2-onelap-scraping.md for why browser-autoread was
-    explored then abandoned (ABE on Chrome/Edge 125+ can't be reliably
-    decrypted even with admin on Windows).
+    见 ``contexts/phase2-onelap-api.md``。顽鹿改版时可设环境变量 **``ONELAP_LIST_URL``**
+    为抓包得到的活动列表 JSON 的**完整 URL**（覆盖内置候选端点）。
+
+    浏览器自动读 Cookie 已放弃（见 ``phase2-onelap-scraping.md``，Chrome/Edge ABE）。
     """
+    interactive_cookie = cookie_string is None
     if cookie_string is None:
         cookie_string = typer.prompt(
-            "Paste your Onelap 'Cookie' header value",
+            "Paste your Onelap 'Cookie' header value (full line from u.onelap.cn XHR)",
             hide_input=True,
         )
+    if interactive_cookie and bearer is None:
+        typer.echo(
+            "Optional: paste Authorization token only (after 'Bearer ' in DevTools), "
+            "or press Enter to skip / keep a previously saved token:"
+        )
+        line = input().strip()
+        if line:
+            bearer = line
     try:
-        jar = save_cookies_from_string(cookie_string, DEFAULT_COOKIE_PATH)
+        jar = save_cookies_from_string(
+            cookie_string, DEFAULT_COOKIE_PATH, bearer=bearer
+        )
     except ValueError as e:
         typer.echo(f"[error] {e}", err=True)
         raise typer.Exit(code=1)
@@ -560,6 +574,16 @@ def onelap_login(
     typer.echo(
         f"Saved {len(jar.cookies)} cookie entries to {DEFAULT_COOKIE_PATH}."
     )
+    if jar.bearer:
+        typer.echo("Also stored Authorization bearer token (for OTM /record APIs).")
+
+    if len(jar.cookies) < 5 or "OTOKEN" not in jar.cookies:
+        typer.echo(
+            "[hint]  当前 Cookie 项较少或未含 OTOKEN=；**若等下为 [ok] 可忽略本提示**。"
+            "若**未**通过验证，再从 u.onelap.cn 某条 200+JSON 的 XHR 复制**完整** Cookie: 行，"
+            "并保留 Bearer（顽鹿 OTM 常只需少量站点 Cookie + JWT）。",
+            err=True,
+        )
 
     # Live probe: confirm the cookies work against the real API. This is
     # the authoritative "is the user logged in" check — without it the
@@ -568,9 +592,12 @@ def onelap_login(
         client = get_authenticated_onelap_client()
         activities = client.list_activities(limit=1)
     except OnelapAuthRequired as e:
+        typer.echo(f"[error] 顽鹿未返回 JSON 列表（多像是登录态无效）: {e}", err=True)
         typer.echo(
-            f"[error] Cookies saved but rejected by Onelap: {e}\n"
-            "Log in again in your browser, then re-run this command.",
+            "排查: (1) 在已登录的页面打开 DevTools → Network，过滤 u.onelap，点一条 200 且 "
+            "Preview/Response 为 JSON 的请求；(2) 复制**该请求**的完整 Cookie: 行，不要从 "
+            "Application → Cookies 里只勾选几列；(3) 同一次粘贴保留 --bearer；(4) 若仍只有 HTML，"
+            "在 PowerShell 设置环境变量 ONELAP_LIST_URL=该条请求的完整“请求 URL”后再重试。",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -677,6 +704,24 @@ def sync(
     )
     if report.failure_count:
         raise typer.Exit(code=1)
+
+
+@app.command("mark-manual")
+def mark_manual(
+    activity_ids: list[str] = typer.Argument(
+        ...,
+        help="顽鹿活动 id，与 sync 日志里 id= 一致，可一次填多个。",
+    ),
+) -> None:
+    """本工具外已处理或放弃自动同步的活动：写入本地日志，之后 ``sync`` 会跳过这些 id。
+
+    典型场景：顽鹿 FIT 在 CDN 上 404、你已用 ``upload`` 把本地 fit 传上 Strava。
+    """
+    with SyncLog.open(DEFAULT_DB_PATH) as log:
+        for aid in activity_ids:
+            log.mark_onelap_manual(aid)
+    for aid in activity_ids:
+        typer.echo(f"marked Onelap activity {aid} as manual (skipped by sync).")
 
 
 @app.command(name="sync-log")

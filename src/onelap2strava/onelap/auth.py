@@ -51,15 +51,21 @@ class CookieJar:
 
     cookies: dict[str, str]
     saved_at: int  # unix seconds
+    # OTM /record 下部分接口（如 fit_content）在 Cookie 外仍发 ``Authorization: Bearer``。
+    bearer: str | None = None
 
     def to_json(self) -> dict:
-        return {"cookies": self.cookies, "saved_at": self.saved_at}
+        out: dict = {"cookies": self.cookies, "saved_at": self.saved_at}
+        if self.bearer:
+            out["bearer"] = self.bearer
+        return out
 
     @classmethod
     def from_json(cls, data: dict) -> "CookieJar":
         return cls(
             cookies=dict(data["cookies"]),
             saved_at=int(data.get("saved_at", 0)),
+            bearer=(data.get("bearer") or None),
         )
 
 
@@ -96,10 +102,29 @@ def _parse_cookie_header(raw: str) -> dict[str, str]:
     return out
 
 
+def _normalize_bearer(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    t = str(raw).strip()
+    if not t:
+        return None
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t or None
+
+
 def save_cookies(
-    cookies: dict[str, str], path: Path = DEFAULT_COOKIE_PATH
+    cookies: dict[str, str],
+    path: Path = DEFAULT_COOKIE_PATH,
+    *,
+    bearer: str | None = None,
 ) -> CookieJar:
     """Persist an already-parsed cookie dict to disk.
+
+    If ``bearer`` is ``None`` (the default), any existing ``bearer`` in the
+    file at ``path`` is preserved so a cookie refresh does not drop the JWT.
+    If ``bearer`` is a string (including empty), it replaces the stored value
+    after normalization (empty clears).
 
     Shared sink for both manual paste (``save_cookies_from_string``) and
     browser-auto-import (``browser_cookies.load_onelap_cookies_from_browser``)
@@ -107,22 +132,36 @@ def save_cookies(
     """
     if not cookies:
         raise ValueError("Refusing to save an empty cookie dict.")
-    jar = CookieJar(cookies=dict(cookies), saved_at=int(time.time()))
+    if bearer is None:
+        prev = load_cookie_jar(path) if path.exists() else None
+        b = prev.bearer if prev is not None else None
+    else:
+        b = _normalize_bearer(bearer)
+    jar = CookieJar(
+        cookies=dict(cookies), saved_at=int(time.time()), bearer=b
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(jar.to_json(), indent=2), encoding="utf-8")
-    logger.info("Onelap cookies saved to %s (%d entries)", path, len(cookies))
+    n_b = ", bearer set" if jar.bearer else ""
+    logger.info("Onelap cookies saved to %s (%d entries%s)", path, len(cookies), n_b)
     return jar
 
 
 def save_cookies_from_string(
-    raw_cookie_string: str, path: Path = DEFAULT_COOKIE_PATH
+    raw_cookie_string: str,
+    path: Path = DEFAULT_COOKIE_PATH,
+    *,
+    bearer: str | None = None,
 ) -> CookieJar:
     """Parse + persist a ``Cookie:`` header string to disk.
+
+    ``bearer`` sets or updates the optional JWT for OTM APIs; ``None`` keeps
+    any existing ``bearer`` in the file on disk.
 
     Returns the stored :class:`CookieJar` for caller feedback.
     """
     cookies = _parse_cookie_header(raw_cookie_string)
-    return save_cookies(cookies, path)
+    return save_cookies(cookies, path, bearer=bearer)
 
 
 def load_cookie_jar(path: Path = DEFAULT_COOKIE_PATH) -> CookieJar | None:
@@ -146,4 +185,6 @@ def get_authenticated_onelap_client(
             f"No Onelap cookies found at {path}. "
             "Run `onelap2strava onelap-login` first."
         )
-    return OnelapClient(cookies=jar.cookies)
+    return OnelapClient(
+        cookies=jar.cookies, authorization_bearer=jar.bearer
+    )

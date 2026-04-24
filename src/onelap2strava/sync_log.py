@@ -52,6 +52,10 @@ STATUS_OK = "ok"
 STATUS_DUPLICATE = "duplicate"
 STATUS_FAILED = "failed"
 STATUS_BACKFILLED = "backfilled"
+# User chose not to use automatic download (e.g. Onelap CDN 404) and handled
+# the ride elsewhere, or will only upload a local .fit. Treated like "seen"
+# for ``sync`` scheduling but excluded from fuzzy dedup.
+STATUS_MANUAL = "manual"
 
 # Rows that mean "this ride was already handled and should not be retried
 # as a fresh upload". ``failed`` is excluded so a transient upload failure
@@ -244,24 +248,33 @@ class SyncLog:
         return None
 
     def seen_onelap_ids(self) -> set[str]:
-        """Onelap activity ids already handled (any non-failed status).
+        """Onelap activity ids to skip in ``sync`` (ok / duplicate / manual).
 
-        ``backfilled`` placeholder ids (``backfilled:<filename>``) are
-        excluded intentionally: they exist to power fuzzy dedup by
-        start-time/point but they cannot match a real Onelap activity id
-        returned by ``/analysis/list``. Keeping them in this set would do
-        no harm today — but would silently stop matching if Onelap ever
-        returned an id starting with ``backfilled:`` for some reason.
+        ``failed`` is excluded so download/upload errors are retried.
+        ``backfilled:`` rows are excluded (placeholders, not list ids).
         """
         rows = self._conn.execute(
             """
             SELECT onelap_activity_id FROM synced_activities
-            WHERE status IN (?, ?)
+            WHERE status IN (?, ?, ?)
               AND onelap_activity_id NOT LIKE 'backfilled:%'
             """,
-            (STATUS_OK, STATUS_DUPLICATE),
+            (STATUS_OK, STATUS_DUPLICATE, STATUS_MANUAL),
         ).fetchall()
         return {row["onelap_activity_id"] for row in rows}
+
+    def mark_onelap_manual(self, onelap_activity_id: str) -> None:
+        """Record that this list id is intentionally not pulled by ``sync``."""
+        self.record_sync(
+            onelap_activity_id=onelap_activity_id,
+            fit_sha1="",
+            start_time_utc=datetime.now(tz=timezone.utc),
+            duration_s=None,
+            start_lat=None,
+            start_lng=None,
+            strava_activity_id=None,
+            status=STATUS_MANUAL,
+        )
 
     def recent(self, limit: int = 20) -> list[SyncRecord]:
         """Most recently synced rows for the ``sync-log`` CLI/debug command."""

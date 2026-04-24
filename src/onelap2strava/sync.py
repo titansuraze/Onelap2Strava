@@ -409,9 +409,16 @@ def _run_with_log(
             before,
         )
     else:
-        activities = onelap.list_activities(limit=limit)
+        seen = sync_log.seen_onelap_ids()
+        full = onelap.list_activities()
+        before = len(full)
+        full = [a for a in full if a.activity_id not in seen]
+        activities = full[:limit]
         logger.info(
-            "pulled %d activities from Onelap (limit=%d)", len(activities), limit
+            "pulled %d activities from Onelap (after skipping %d seen, limit=%d)",
+            len(activities),
+            before - len(full),
+            limit,
         )
 
     report = SyncReport()

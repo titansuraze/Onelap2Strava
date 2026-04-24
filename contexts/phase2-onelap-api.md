@@ -6,18 +6,17 @@
 
 > 来源：开源项目 [`moruoxian/SyncOnelapToXoss`](https://github.com/moruoxian/SyncOnelapToXoss) 的 `fetch_activities` / `download_fit_file` + 多个 CSDN 博客交叉印证。存量代码已按这三个接口跑通过一轮（参考项目广泛使用）。
 
-### 1.1 认证态：Cookie 为主
+### 1.1 认证态：Cookie +（OTM 上常见的）`Authorization: Bearer`
 
-顽鹿 Web 端走传统 Cookie/Session 体系，没有明显的 `Bearer token`。**有效登录后，浏览器里打到 `u.onelap.cn` 的请求，`Cookie` 头里的内容就是凭证**。Cookie 通常种在父域 `.onelap.cn`，对 `www` 和 `u` 子域同时有效。
+顽鹿 Web 端以 **Cookie/Session** 为站点登录基础；`https://u.onelap.cn/record` 的 **OTM** JSON 接口在实测中往往还带 **`Authorization: Bearer <JWT>`**（与 Cookie 同见于 Network 的 XHR/Fetch 请求行），列表与 FIT 下载以 **「Cookie + 该 JWT」** 同一会话**透传**最稳。Cookie 可只含少量键（如 `ouid`、`onelap_web_session`、分析类 `_*` 等），**不必然**再出现老文档里写的 `OTOKEN`——以 `onelap-login` 的 **[ok] 验证**为准。
 
-**实测观察到的业务 Cookie 键**（来自实际登录后 DevTools 查看）：
+**历史上仍常见的 Cookie 键**（按环境有无差异很大，以浏览器 Application / 抓包为准）：
 
-- `OTOKEN` — 主要鉴权 token，JWT-like 结构（`{iv, value, mac}` 的 Base64 JSON）。
-- `XSRF-TOKEN` — CSRF 防御 token，同样的 `{iv, value, mac}` 结构。
+- `OTOKEN` / `XSRF-TOKEN` 等：部分页面或老路径仍有；**OTM 上未必出现**。
 - `ouid` — 用户 ID（明文整数）。
-- `_c_WBKFRo` / `_nb_ioWEgULi` — 埋点类 Cookie，可能不参与鉴权但建议一并透传。
+- `onelap_web_session` — 站点会话；`_c_*` 等 — 常一并透传。
 
-> 注意：多个 CSDN 博客提到的 `PHPSESSID` / `access_token` 在实测里**并不存在**——说明顽鹿后端已经更换鉴权实现（或者博客作者写的本来就不准）。这正是"**全量透传**"策略的意义：把浏览器 Cookie 串整条塞进请求头，不挑字段，以规避键名变动和二手信息误差。
+> 多份二手资料提到 `PHPSESSID` 等，与当前 u 子域不一定一致。策略不变：**从「Response 为 JSON 的 u.onelap.cn XHR」复制整行 `Cookie:`，并复制同一会话的 `Bearer` JWT** 写入 `data/.onelap_cookies.json`（见 `onelap-login`）。
 
 #### Cookie 导入：只保留手粘一条路径
 
@@ -34,32 +33,30 @@ onelap-login --cookie "…"  # 非交互，适合脚本化场景
 
 ### 1.2 活动列表
 
+**历史**：`GET http://u.onelap.cn/analysis/list` 曾直接返回与下述同构的 JSON；约 2026 起该地址常变 HTML/重定向，**不要再依赖**作入口。
+
+**当前**：在 [`/record`](https://u.onelap.cn/record) 前端下，列表由 OTM 接口提供。其中 **`/api/otm/ride_record/list` 在浏览器里为 `POST` + `Content-Type: application/json`**（带分页类请求体）；本仓库对该 URL 会依次用若干常见 JSON 体发 POST，再回退到 GET。其它候选与旧 `/analysis/list` 仍以 GET 为主。可用环境变量 **`ONELAP_LIST_URL`** 覆盖为抓包得到的一条完整 URL。
+
 ```
-GET http://u.onelap.cn/analysis/list
+POST https://u.onelap.cn/api/otm/ride_record/list
+  Body: 与抓包一致为 ``{"page":1,"limit":20}``；程序优先尝试 ``page`` + 较大 ``limit``，并保留其它分页键名作备选
+GET  https://u.onelap.cn/api/otm/ride_record/record_list
+GET  https://u.onelap.cn/api/otm/ride_record/records
+...（及候选末端的旧 /analysis/list）
 Headers:
-  Cookie: <从浏览器拷的完整 cookie 串>
-  User-Agent: <任意常见 UA>
+  Cookie: <完整 cookie 串>
+  Referer: https://u.onelap.cn/record/
+  Authorization: Bearer <JWT>   # 与 Cookie 同见于浏览器，sync 时建议一并配置（``onelap-login --bearer`` / ``.onelap_cookies.json`` 的 ``bearer``）
+  User-Agent: <常见桌面 UA>
 ```
 
-响应（JSON 片段，关键字段）：
+响应常见 **`{ "code": 200, "data": [ {...}, ... ] }`**，亦兼容无 `code` 的老形 **`{ "data": [ ... ] }`**；`data` 为对象时或键为 `list` / `records` 等，见 :mod:`onelap2strava.onelap.client` 的解析。
 
-```json
-{
-  "data": [
-    {
-      "created_at": 1712345678,         // unix 秒，活动开始时间
-      "totalDistance": 32170,           // 米
-      "elevation": 123,                 // 米
-      "durl": "/analysis/download/XXXXXX.fit",  // Fit 下载路径（相对）
-      "fileKey": "MAGENE_C506_XXXX.fit",        // 原始文件名
-      "fitUrl": "..."                           // 可能的备用文件名
-    },
-    ...
-  ]
-}
-```
+约 2026-04 起，列表 `POST /ride_record/list` 的 Payload 抓包为 `{"page":1,"limit":20}`；本仓库会优先用 `page` + 较大 `limit` 等候选体。
 
-**返回顺序**：参考项目从不排序直接用，结合 `created_at` 字段看，默认是**最新在前**（最常见的约定）。接入层统一按 `created_at` 降序排一次兜底。
+**列表项可能是「摘要」行**：仅含 `id`、**`distance_km`**、**`start_riding_time`** 等，**无** `durl` / `fileKey`。接入层在 :mod:`onelap2strava.onelap.models` 中将其转为 ``Activity``（占位 `download_path`、时间用 `start_riding_time` 等、`raw` 里补 `_id` 供 Referer），下载前再由 :mod:`onelap2strava.onelap.client` 尝试 **`/api/otm/ride_record/detail`**（POST/GET 若干形式）**合并** `fileKey` / `durl`；仍无法下载时再对照浏览器详情页 Network 中真实 detail URL 校准。老列表仍可能直接给 `durl` + `fileKey`。
+
+**返回顺序**：接入层将解析结果统一按时间（含摘要里的东八区时间）转 UTC 后**降序**排一次。
 
 ### 1.3 Fit 下载
 
@@ -70,6 +67,14 @@ Headers:
 ```
 
 返回：`application/octet-stream`，Body 是 Fit 二进制。可从 `Content-Disposition: filename="..."` 拿文件名；拿不到就用 `fileKey` / `fitUrl` 兜底，最后兜底 `activity.fit`。
+
+**补充（约 2026-04）**：运动记录前端迁到 `https://u.onelap.cn/record`，详情页「下载」走 OTM，与 `durl` 里 `fits.rfsvr.net` 直链并存；新链形式为：
+
+```
+GET https://u.onelap.cn/api/otm/ride_record/analysis/fit_content/{BASE64(fileKey路径)}
+```
+
+其中 `fileKey` 为 **UTF-8 路径**字符串，例如 `geo/20260424/MAGENE_....fit`（**来源**可是列表、或列表无 `fileKey` 时由 **detail 接口** 补全），经标准 Base64 编码后作为路径**最后一段**（可含 `=` 填充）。需 **Cookie**；OTM 上通常还带 **`Authorization: Bearer <JWT>`** 与 **`Referer: https://u.onelap.cn/record/details?id=<_id>`**（`raw` 里用 **`_id` 或 `id`** 均可）。**勿**在浏览器地址栏直接打开 `fit_content` URL 来验证——整页导航不会带 `Authorization`，易见 `403`「Authorization fail!」。接入层在 :mod:`onelap2strava.onelap.client` 中对该 GET 带上述 Referer，JWT 在 ``data/.onelap_cookies.json`` 的 ``bearer`` 字段（见 ``onelap-login --bearer``），下载候选**优先**该端点，再回退 `durl` / 旧式 ``/analysis/download/...``。
 
 ### 1.4 登录（待确认）
 
@@ -138,7 +143,7 @@ Headers:
 
 | 契约 | 位置 | 内容 |
 | --- | --- | --- |
-| 端点配置 | `src/onelap2strava/onelap/client.py`（模块常量） | `BASE_URL_U`、`PATH_LIST`、`USER_AGENT` |
+| 端点配置 | `src/onelap2strava/onelap/client.py`（模块常量） | `BASE_URL_U`、`PATH_LIST`、`PATH_OTM_FIT_CONTENT`、`USER_AGENT` |
 | Activity 字段映射 | `src/onelap2strava/onelap/models.py::Activity.from_api` | `created_at` / `durl` / `fileKey` / `totalDistance` 等 |
 | 认证载体 | `src/onelap2strava/onelap/auth.py` | Cookie 持久化在 `data/.onelap_cookies.json` |
 | 登录入口 | CLI 的 `onelap-login` 子命令 | 目前只有手粘一条路径；未来加 API 登录时在这里扩展第二条 |
