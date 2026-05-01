@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 
 from onelap2strava.onelap.models import Activity
 from onelap2strava.strava_auth import StravaCredentials, Tokens, _load_tokens
-from onelap2strava.sync import SyncReport
+from onelap2strava.strava_client import UploadOutcome
+from onelap2strava.sync import ActivitySyncResult, SyncReport
 from onelap2strava.web.app import create_app
 from onelap2strava.web.auth import (
     ConnectionStatus,
@@ -70,6 +71,7 @@ def test_index_renders_connection_statuses() -> None:
     assert "尚未上传" in response.text
     assert "32.1 km" in response.text
     assert "https://u.onelap.cn/recordPage/details?id=ride-1" in response.text
+    assert 'href="/sync"' not in response.text
 
 
 def test_onelap_form_reports_parse_error() -> None:
@@ -240,6 +242,37 @@ def test_sync_start_uses_incremental_runner() -> None:
     assert called["force"] is False
 
 
+def test_sync_start_redirects_back_home_without_hx() -> None:
+    manager = SyncJobManager(
+        runner=lambda **_: SyncReport(),
+        onelap_factory=lambda: SimpleNamespace(),
+        strava_factory=lambda: SimpleNamespace(),
+    )
+    app = create_app(
+        job_manager=manager,
+        strava_status_func=lambda: _status("Strava ready"),
+        onelap_status_func=lambda: _status("Onelap ready"),
+    )
+    client = TestClient(app)
+
+    response = client.post("/sync/start", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+
+
+def test_sync_page_is_not_exposed() -> None:
+    app = create_app(
+        strava_status_func=lambda: _status("Strava ready"),
+        onelap_status_func=lambda: _status("Onelap ready"),
+    )
+    client = TestClient(app)
+
+    response = client.get("/sync")
+
+    assert response.status_code == 404
+
+
 def test_sync_start_latest_uses_n_one_runner() -> None:
     called: dict = {}
 
@@ -316,8 +349,22 @@ def test_sync_activity_filters_to_selected_onelap_activity() -> None:
 
 
 def test_sync_status_renders_finished_report() -> None:
+    report = SyncReport(
+        results=[
+            ActivitySyncResult(
+                activity=_activity(),
+                uploaded=UploadOutcome(
+                    skipped_duplicate=False,
+                    existing_activity_id=None,
+                    new_activity_id=123,
+                    activity_url="https://www.strava.com/activities/123",
+                    external_id="sha1:abc",
+                ),
+            )
+        ]
+    )
     manager = SyncJobManager(
-        runner=lambda **_: SyncReport(),
+        runner=lambda **_: report,
         onelap_factory=lambda: SimpleNamespace(),
         strava_factory=lambda: SimpleNamespace(),
     )
@@ -337,5 +384,7 @@ def test_sync_status_renders_finished_report() -> None:
     response = client.get("/sync/status")
 
     assert response.status_code == 200
-    assert "同步完成" in response.text
+    assert "成功上传 1 条" in response.text
+    assert "已上传到 Strava" in response.text
+    assert "ok=" not in response.text
 

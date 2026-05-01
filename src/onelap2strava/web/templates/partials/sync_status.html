@@ -8,11 +8,7 @@
   {% elif job.error %}
     <p class="flash error">同步失败：{{ job.error }}</p>
   {% elif job.report %}
-    <p class="flash ok">
-      同步完成：ok={{ job.report.success_count }}，
-      duplicate={{ job.report.skipped_duplicate_count }}，
-      fail={{ job.report.failure_count }}
-    </p>
+    <p class="flash {% if job.report.failure_count %}warn{% else %}ok{% endif %}">{{ job.summary or "同步完成。" }}</p>
   {% elif job.has_result %}
     <p class="flash ok">同步完成。</p>
   {% else %}

@@ -214,12 +214,6 @@ def create_app(
             status_code=200 if status.ok else 400,
         )
 
-    @app.get("/sync", response_class=HTMLResponse)
-    def sync_page(request: Request):
-        ctx = common_context(request)
-        ctx["job"] = jobs.snapshot()
-        return templates.TemplateResponse(request, "sync.html", ctx)
-
     @app.post("/sync/start", response_class=HTMLResponse)
     def sync_start(
         request: Request,
@@ -232,7 +226,7 @@ def create_app(
         ctx = {"request": request, "job": jobs.snapshot()}
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(request, "partials/sync_status.html", ctx)
-        return RedirectResponse("/sync", status_code=303)
+        return RedirectResponse("/", status_code=303)
 
     @app.post("/sync/activity/{activity_id}", response_class=HTMLResponse)
     def sync_activity(request: Request, activity_id: str):

@@ -23,6 +23,7 @@ class SyncJobSnapshot:
     finished_at: datetime | None = None
     report: SyncReport | None = None
     error: str | None = None
+    summary: str | None = None
     messages: list[str] = field(default_factory=list)
 
     @property
@@ -58,6 +59,7 @@ class SyncJobManager:
                 finished_at=self._snapshot.finished_at,
                 report=self._snapshot.report,
                 error=self._snapshot.error,
+                summary=self._snapshot.summary,
                 messages=list(self._snapshot.messages),
             )
 
@@ -134,12 +136,14 @@ class SyncJobManager:
                 onelap=onelap,
                 strava=self._strava_factory(),
             )
-            messages = [r.pretty() for r in report.results]
+            summary = _sync_summary(report)
+            messages = [_activity_result_message(r) for r in report.results]
             if not messages:
                 messages = ["没有发现需要同步的骑行。"]
             error = None
         except Exception as e:  # noqa: BLE001 - surfaced to the web page
             report = None
+            summary = None
             messages = []
             error = str(e)
 
@@ -148,6 +152,7 @@ class SyncJobManager:
             self._snapshot.finished_at = datetime.now(tz=timezone.utc)
             self._snapshot.report = report
             self._snapshot.error = error
+            self._snapshot.summary = summary
             self._snapshot.messages = messages
 
 
@@ -166,4 +171,33 @@ class _SingleActivityOnelapClient:
 
     def download_fit(self, activity: Activity, *, cache_dir: Path):
         return self._delegate.download_fit(activity, cache_dir=cache_dir)
+
+
+def _sync_summary(report: SyncReport) -> str:
+    if not report.results:
+        return "没有发现需要同步的新骑行。"
+
+    parts: list[str] = []
+    if report.success_count:
+        parts.append(f"成功上传 {report.success_count} 条")
+    if report.skipped_duplicate_count:
+        parts.append(f"已跳过 {report.skipped_duplicate_count} 条重复记录")
+    if report.failure_count:
+        parts.append(f"{report.failure_count} 条同步失败")
+    return "，".join(parts) + "。"
+
+
+def _activity_result_message(result) -> str:
+    activity = result.activity
+    start = activity.created_at_utc.astimezone().strftime("%Y-%m-%d %H:%M")
+    distance_km = activity.distance_m / 1000.0
+    prefix = f"{start}    {distance_km:.1f} km"
+
+    if result.error:
+        return f"{prefix}    同步失败：{result.error}"
+    if result.uploaded is not None and result.uploaded.skipped_duplicate:
+        return f"{prefix}    已跳过，Strava 上已有这次骑行。"
+    if result.ok:
+        return f"{prefix}    已上传到 Strava。"
+    return f"{prefix}    未上传。"
 
