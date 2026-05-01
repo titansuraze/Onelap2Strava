@@ -64,11 +64,11 @@ uv run onelap2strava auth
 
 ### 2. 在浏览器里打开顽鹿「运动记录」并抓一条 API
 
-顽鹿已把记录迁到 [**https://u.onelap.cn/record**](https://u.onelap.cn/record)。请在 **已登录** 的 Chrome/Edge 中打开该页（或子页面），再准备复制请求头。
+顽鹿已把记录迁到 [**https://u.onelap.cn/recordPage**](https://u.onelap.cn/recordPage)。请在 **已登录** 的 Chrome/Edge 中打开该页（或子页面），再准备复制请求头。
 
-### 3. 把 Cookie、（以及常见需要的）Authorization 粘给 `onelap-login`
+### 3. 把 Cookie 和 Authorization 粘给 `onelap-login`
 
-1. 按 <kbd>F12</kbd> → **Network** → 刷新或切换页面。在 Filter 中输入 `list`，在列表里点一条 **URL 在 `u.onelap.cn`的 POST**。
+1. 按 <kbd>F12</kbd> → **Network** → 刷新或切换页面。在 Filter 中输入 `list`，点开 **Request URL 为 `https://u.onelap.cn/api/otm/ride_record/list` 的 POST**。
 2. 右侧 **Headers** → **Request Headers** → 整行复制 **`Cookie:`** 冒号后的**全部**内容。
 3. 同一条请求上，复制 **`Authorization: ` 后那段 JWT**（`eyJ` 开头的那条）。
 4. 在终端运行：
@@ -77,10 +77,10 @@ uv run onelap2strava auth
    # 或一次写完：
    # uv run onelap2strava onelap-login --cookie "整段Cookie" --bearer "eyJ..."
    ```
-   先按提示粘贴 **Cookie**（**隐藏输入**），若未使用 `--bearer`，会再询问是否粘贴 **Token**；直接回车可跳过或沿用上次的 token。
+   先按提示粘贴 **Cookie**（**隐藏输入**），再粘贴同一条请求里的 **Authorization**。
 5. 成功时终端里会出现 `[ok] verified: latest activity = ...`（会请求 OTM 活动列表，而不仅是旧的 `GET /analysis/list`）。若先出现关于 Cookie/OTOKEN 的 `[hint]`，**只要本步已是 `[ok]` 即可忽略**。
 
-**Cookie 能用多久？** 一般数天到数周。过期时同样回到本页、重新从 Network 取 **同一会话**下的 Cookie 与 **Bearer** 后重跑 `onelap-login`。**仅更新 Cookie** 而不带 `--bearer` 时，会**保留**已保存在 `data/.onelap_cookies.json` 里的 `bearer` 字段。
+**Cookie 能用多久？** 一般数天到数周。过期时同样回到本页、重新从 Network 取 **同一条请求**下的 Cookie 与 Authorization 后重跑 `onelap-login`。
 
 若你抓包得到的「活动列表」URL 与程序内置均不一致，可设置环境变量 **`ONELAP_LIST_URL`** 为该请求的完整地址后再运行 `sync` / `onelap-login` 验证。
 
@@ -99,6 +99,21 @@ uv run onelap2strava sync --force         # 跳过所有去重，强制上传
 uv run onelap2strava auto-sync install --mode hourly --every 4      # 每 4 小时
 uv run onelap2strava auto-sync install --mode daily --at 22:00      # 每天 22:00
 uv run onelap2strava auto-sync uninstall                            # 移除
+```
+
+### 6. 本机 Web 图形界面
+
+不习惯命令行时，可以启动本机 Web 控制台完成 Strava / 顽鹿授权、近期运动查看、批量同步、同步最新数据和同步历史查看：
+
+```bash
+uv run onelap2strava web
+```
+
+看到下面输出后，在浏览器打开对应地址：
+
+```
+Starting Onelap2Strava Web UI at http://127.0.0.1:8765
+Press Ctrl+C to stop.
 ```
 
 ## 其他命令
@@ -180,10 +195,10 @@ A: 会——但只对"瞬时"错误。网络连接错误（`ConnectionError`）�
 A: 不是。`onelap-login` 交互式 prompt 故意关掉了输入回显（Cookie 里带敏感 token），粘贴时看起来像没动——直接回车就好，脚本会立刻解析并把结果打出来。如果不喜欢这个行为可以走 `--cookie "<值>"` 非交互形式。
 
 **Q: 从 DevTools 复制 Cookie 时最容易踩的坑？**
-A: 在带百度埋点的顽鹿子页面里随便点一条请求，很容易选成 **第三方域** 的埋点，Cookie 全无效。请打开 **`https://u.onelap.cn/record`**，在 Network 里用 **`u.onelap` / `otm` 过滤**，只从 **`Host` 为 `u.onelap.cn`** 且 **Response 为 JSON** 的 XHR 上复制 `Cookie`（和常见的 `Authorization: Bearer`）——与 `onelap-login` 里的说明一致。
+A: 在带百度埋点的顽鹿子页面里随便点一条请求，很容易选成 **第三方域** 的埋点，Cookie 全无效。请打开 **`https://u.onelap.cn/recordPage`**，在 Network 里搜索 `list`，只从 **Request URL 为 `https://u.onelap.cn/api/otm/ride_record/list`** 的那条 POST 请求上复制 `Cookie` 和 `Authorization: Bearer`。
 
 **Q: Cookie 只有三两条、也看不到 OTOKEN=，这能用吗？**
-A: 可以。在 [`/record`](https://u.onelap.cn/record) 的 OTM 接口上，浏览器往往只带**少量**站点 Cookie，鉴权还依赖同一条/同一会话里的 **`Authorization: Bearer` JWT**。**`onelap-login` 打印 `[ok] verified`** 就是硬标准；未通过时再去换**另一条** 200+JSON 的 XHR 上的完整 `Cookie` 行，并保留有效 Bearer。不要把**地址栏里直接打开**的 `fit_content` 链接当测试依据（整页 GET 常不带 `Authorization`）。
+A: 可以。在 [`/recordPage`](https://u.onelap.cn/recordPage) 的 `ride_record/list` 请求上，浏览器往往只带**少量**站点 Cookie，鉴权还依赖同一条请求里的 **`Authorization: Bearer` JWT**。**`onelap-login` 打印 `[ok] verified`** 就是硬标准。不要把**地址栏里直接打开**的 `fit_content` 链接当测试依据（整页 GET 常不带 `Authorization`）。
 
 **Q: 为什么不自动读浏览器 Cookie？**
 A: 曾经实现过（`--from-browser` 选项 + `browser-cookie3` 依赖）。Chrome / Edge 125+ 的 App-Bound Encryption 让这条路径在 Windows 上极不稳定——有时 `[Errno 13] Permission denied`，有时 `Unable to get key for cookie decryption`，以管理员身份也未必解得开，不同机器行为差异很大。维护"看起来方便实际时灵时不灵"的路径比让用户手粘一次体验更糟，已经完全下线。完整决策过程见 [contexts/phase2-onelap-scraping.md](contexts/phase2-onelap-scraping.md)。
@@ -202,6 +217,9 @@ A: `0` 表示成功（含「无新活动」）；`1` 表示本次有失败条目
 
 **Q: 有 `sync --dry-run` 吗？**
 A: 目前没有。可先查 `sync-log`、用 `onelap-list` 看顽鹿侧列表；需要更详细日志时在子命令**前**加全局 `-v`：`uv run onelap2strava -v sync --incremental`。
+
+**Q: Web 里的两个同步按钮有什么区别？**
+A: Web 里有两个入口：**批量同步数据**会同步尚未上传的新骑行；**同步最新数据**只处理最近一次骑行。命令行 `sync` 为兼容老用户仍默认只处理最新 1 条。
 
 ## 项目结构
 
@@ -233,6 +251,7 @@ Onelap2Strava/
 │   ├── strava_client.py    # Strava 上传 + 去重 + 轮询
 │   ├── sync.py             # 主编排：onelap 拉 → 模糊去重 → fix → 重试上传 → 落日志
 │   ├── sync_log.py         # 本地 SQLite 同步日志（模糊去重 / 增量 / backfill）
+│   ├── web/                # localhost Web 控制台（授权、近期运动、同步触发）
 │   ├── onelap/             # 顽鹿接口层（接口改版时只改这里）
 │   │   ├── client.py       # HTTP + 列表/下载 + 会话过期识别
 │   │   ├── auth.py         # Cookie 持久化与加载
@@ -244,7 +263,8 @@ Onelap2Strava/
 │   ├── test_fit_fixer.py
 │   ├── test_onelap_client.py
 │   ├── test_sync.py
-│   └── test_sync_log.py
+│   ├── test_sync_log.py
+│   └── test_web.py
 ├── test_data/              # 测试夹具
 │   ├── MAGENE_C506_bias.fit
 │   └── MAGENE_C506_correct.fit
@@ -286,7 +306,7 @@ uv run pytest -s        # 打印夹具对比的 bias vs fixed 指标
 
 - **Phase 3.1 ✅**：本地 SQLite 同步日志 + 模糊去重（时间 ± 时长 + 起点三元组）+ 失败重试（指数退避）+ 增量同步。已交付。
 - **Phase 4 ✅**：定时同步——用操作系统计划任务或 `cron` / `systemd` 调用 `sync --incremental`；文档见 [contexts/phase4-scheduled-sync.md](contexts/phase4-scheduled-sync.md)。已交付。
-- **Phase 5 💡 Web 化（可选）**：FastAPI + 前端、浏览器内 Strava 授权与顽鹿 Cookie 录入、托管形态下的定时同步等。详见路线图。
+- **Phase 5 🚧 Web 化**：localhost 单用户 Web 控制台，浏览器内授权信息管理、近期运动查看、批量同步、同步最新数据和同步历史查看。
 
 ## 许可
 

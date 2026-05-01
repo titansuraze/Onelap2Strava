@@ -19,6 +19,7 @@ Onelap-pull commands:
 - ``sync``        : pull latest Onelap activities and upload to Strava end-to-end.
 - ``mark-manual`` : record Onelap ids to skip in ``sync`` (e.g. you uploaded a local fit).
 - ``auto-sync``   : register/remove OS scheduled sync via ``batchfiles/`` scripts.
+- ``web``         : run the localhost single-user web UI.
 """
 
 from __future__ import annotations
@@ -193,6 +194,37 @@ def auto_sync(
             cmd = [bash, str(bf / "install-scheduled-sync-unix.sh"), "daily", at.strip()]
         proc = subprocess.run(cmd, cwd=str(repo_root))
     raise typer.Exit(code=proc.returncode)
+
+
+@app.command(name="web")
+def web(
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Host to bind. Keep the default for local-only use.",
+    ),
+    port: int = typer.Option(
+        8765,
+        "--port",
+        "-p",
+        help="Port for the local web UI.",
+    ),
+) -> None:
+    """Run the localhost web UI for single-user interactive sync."""
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        typer.echo(
+            "[warn] Web UI will listen beyond localhost. It exposes local "
+            "Strava/Onelap credentials; only do this on a trusted network.",
+            err=True,
+        )
+    typer.echo(f"Starting Onelap2Strava Web UI at http://{host}:{port}")
+    typer.echo("Press Ctrl+C to stop.")
+
+    import uvicorn
+
+    from .web.app import create_app
+
+    uvicorn.run(create_app(), host=host, port=port)
 
 # Strava's official OAuth token endpoint. Note the /api/v3/ prefix — the
 # short /oauth/token URL shown in older docs only serves user-facing HTML.
@@ -523,26 +555,24 @@ def onelap_login(
         None,
         "--bearer",
         help=(
-            "Optional: Authorization JWT from the same request as fit download "
+            "Authorization JWT from the same ride_record/list request "
             "(DevTools request headers, paste token only, without the word 'Bearer '). "
-            "If omitted, any existing token in data/.onelap_cookies.json is kept when updating cookies."
         ),
     ),
 ) -> None:
-    """Save Onelap session cookies (and optional JWT) for ``sync`` / ``onelap-list``.
+    """Save Onelap session cookies and Authorization for ``sync`` / ``onelap-list``.
 
-    **1) Cookie（必填）** — 在已登录的 Chrome/Edge 中打开 **``https://u.onelap.cn/record``**，
-    按 F12 → **Network**，刷新。在 Filter 中输入 **``u.onelap``** 或 **``otm``**，点任意一条
-    **到 ``u.onelap.cn`` 的 XHR**（应返回 **JSON**；例如 ``ride_record``、``list`` 等）。
-    在 **Request Headers** 中复制整行 **``Cookie:``** 后的内容；若 OTM 接口仅含少量
-    站点 Cookie 但带 **Bearer** 能返回 JSON，**完整一行并非必须**（以 ``onelap-login`` 末尾 **[ok] 验证** 为准）。
+    **1) Cookie（必填）** — 在已登录的 Chrome/Edge 中打开 **``https://u.onelap.cn/recordPage``**，
+    按 F12 → **Network**，刷新。在 Filter 中输入 **``list``**，点开
+    **Request URL 为 ``https://u.onelap.cn/api/otm/ride_record/list`` 的 POST**。
+    在 **Request Headers** 中复制整行 **``Cookie:``** 后的内容。
 
-    **2) Bearer（常见为必填）** — 在同一条或另一条 **成功 200** 的 ``u.onelap.cn`` 请求上，
+    **2) Bearer（必填）** — 在同一条 ``ride_record/list`` 请求上，
     复制 **``Authorization:``** 里 **``Bearer `** 后面的一整段（不要写单词 ``Bearer``）。
     交互模式下在粘贴 Cookie 后会再询问；也可用 ``--bearer "eyJ..."``。
 
-    数据写入 ``data/.onelap_cookies.json``。仅重登 Cookie 时**不传** ``--bearer`` 会**保留**
-    已保存的 ``bearer``。若仍提示登录/HTML，先确认 Cookie 为**完整**一行，并加上 ``--bearer``。
+    数据写入 ``data/.onelap_cookies.json``。若仍提示登录/HTML，先确认 Cookie 为**完整**一行，
+    并粘贴同一条请求里的 Authorization。
 
     见 ``contexts/phase2-onelap-api.md``。顽鹿改版时可设环境变量 **``ONELAP_LIST_URL``**
     为抓包得到的活动列表 JSON 的**完整 URL**（覆盖内置候选端点）。
@@ -557,12 +587,16 @@ def onelap_login(
         )
     if interactive_cookie and bearer is None:
         typer.echo(
-            "Optional: paste Authorization token only (after 'Bearer ' in DevTools), "
-            "or press Enter to skip / keep a previously saved token:"
+            "Paste Authorization token only (after 'Bearer ' in DevTools):"
         )
         line = input().strip()
-        if line:
-            bearer = line
+        if not line:
+            typer.echo("[error] Authorization is required for Onelap OTM APIs.", err=True)
+            raise typer.Exit(code=1)
+        bearer = line
+    if bearer is None or not bearer.strip():
+        typer.echo("[error] --bearer / Authorization is required.", err=True)
+        raise typer.Exit(code=1)
     try:
         jar = save_cookies_from_string(
             cookie_string, DEFAULT_COOKIE_PATH, bearer=bearer
@@ -596,7 +630,7 @@ def onelap_login(
         typer.echo(
             "排查: (1) 在已登录的页面打开 DevTools → Network，过滤 u.onelap，点一条 200 且 "
             "Preview/Response 为 JSON 的请求；(2) 复制**该请求**的完整 Cookie: 行，不要从 "
-            "Application → Cookies 里只勾选几列；(3) 同一次粘贴保留 --bearer；(4) 若仍只有 HTML，"
+            "Application → Cookies 里只勾选几列；(3) 同一次粘贴 --bearer；(4) 若仍只有 HTML，"
             "在 PowerShell 设置环境变量 ONELAP_LIST_URL=该条请求的完整“请求 URL”后再重试。",
             err=True,
         )

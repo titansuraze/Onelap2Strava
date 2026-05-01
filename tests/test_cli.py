@@ -485,6 +485,26 @@ def test_auto_sync_install_daily_delegates_windows(tmp_path: Path, monkeypatch) 
     assert captured["cmd"][-2:] == ["daily", "07:30"]
 
 
+def test_web_command_starts_uvicorn(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_run(app_obj, *, host, port):
+        captured["app"] = app_obj
+        captured["host"] = host
+        captured["port"] = port
+
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+
+    result = runner.invoke(app, ["web", "--port", "9999"])
+
+    assert result.exit_code == 0
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 9999
+    assert "http://127.0.0.1:9999" in result.stdout
+
+
 def test_sync_incremental_flag_passes_through(monkeypatch) -> None:
     """`--incremental` alone should flow through to run_sync."""
     called: dict = {}

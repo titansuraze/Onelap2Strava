@@ -6,9 +6,9 @@
 
 > 来源：开源项目 [`moruoxian/SyncOnelapToXoss`](https://github.com/moruoxian/SyncOnelapToXoss) 的 `fetch_activities` / `download_fit_file` + 多个 CSDN 博客交叉印证。存量代码已按这三个接口跑通过一轮（参考项目广泛使用）。
 
-### 1.1 认证态：Cookie +（OTM 上常见的）`Authorization: Bearer`
+### 1.1 认证态：Cookie + `Authorization: Bearer`
 
-顽鹿 Web 端以 **Cookie/Session** 为站点登录基础；`https://u.onelap.cn/record` 的 **OTM** JSON 接口在实测中往往还带 **`Authorization: Bearer <JWT>`**（与 Cookie 同见于 Network 的 XHR/Fetch 请求行），列表与 FIT 下载以 **「Cookie + 该 JWT」** 同一会话**透传**最稳。Cookie 可只含少量键（如 `ouid`、`onelap_web_session`、分析类 `_*` 等），**不必然**再出现老文档里写的 `OTOKEN`——以 `onelap-login` 的 **[ok] 验证**为准。
+顽鹿 Web 端以 **Cookie/Session** 为站点登录基础；`https://u.onelap.cn/recordPage` 的 **OTM** JSON 接口还需要 **`Authorization: Bearer <JWT>`**（与 Cookie 同见于 Network 的 XHR/Fetch 请求行），列表与 FIT 下载以 **「Cookie + 该 JWT」** 同一会话**透传**最稳。Cookie 可只含少量键（如 `ouid`、`onelap_web_session`、分析类 `_*` 等），**不必然**再出现老文档里写的 `OTOKEN`——以 `onelap-login` 的 **[ok] 验证**为准。
 
 **历史上仍常见的 Cookie 键**（按环境有无差异很大，以浏览器 Application / 抓包为准）：
 
@@ -35,7 +35,7 @@ onelap-login --cookie "…"  # 非交互，适合脚本化场景
 
 **历史**：`GET http://u.onelap.cn/analysis/list` 曾直接返回与下述同构的 JSON；约 2026 起该地址常变 HTML/重定向，**不要再依赖**作入口。
 
-**当前**：在 [`/record`](https://u.onelap.cn/record) 前端下，列表由 OTM 接口提供。其中 **`/api/otm/ride_record/list` 在浏览器里为 `POST` + `Content-Type: application/json`**（带分页类请求体）；本仓库对该 URL 会依次用若干常见 JSON 体发 POST，再回退到 GET。其它候选与旧 `/analysis/list` 仍以 GET 为主。可用环境变量 **`ONELAP_LIST_URL`** 覆盖为抓包得到的一条完整 URL。
+**当前**：在 [`/recordPage`](https://u.onelap.cn/recordPage) 前端下，列表由 OTM 接口提供。浏览器 Network 中搜索 `list`，**Request URL 为 `https://u.onelap.cn/api/otm/ride_record/list` 的 POST** 是当前明确的凭证来源：同一条请求的 Request Headers 中必定能取到 Cookie 和 Authorization。本仓库对该 URL 会依次用若干常见 JSON 体发 POST，再回退到 GET。其它候选与旧 `/analysis/list` 仍以 GET 为主。可用环境变量 **`ONELAP_LIST_URL`** 覆盖为抓包得到的一条完整 URL。
 
 ```
 POST https://u.onelap.cn/api/otm/ride_record/list
@@ -45,8 +45,8 @@ GET  https://u.onelap.cn/api/otm/ride_record/records
 ...（及候选末端的旧 /analysis/list）
 Headers:
   Cookie: <完整 cookie 串>
-  Referer: https://u.onelap.cn/record/
-  Authorization: Bearer <JWT>   # 与 Cookie 同见于浏览器，sync 时建议一并配置（``onelap-login --bearer`` / ``.onelap_cookies.json`` 的 ``bearer``）
+  Referer: https://u.onelap.cn/recordPage/
+  Authorization: Bearer <JWT>   # 与 Cookie 同见于浏览器，sync 时必须一并配置（``onelap-login --bearer`` / ``.onelap_cookies.json`` 的 ``bearer``）
   User-Agent: <常见桌面 UA>
 ```
 
@@ -68,13 +68,13 @@ Headers:
 
 返回：`application/octet-stream`，Body 是 Fit 二进制。可从 `Content-Disposition: filename="..."` 拿文件名；拿不到就用 `fileKey` / `fitUrl` 兜底，最后兜底 `activity.fit`。
 
-**补充（约 2026-04）**：运动记录前端迁到 `https://u.onelap.cn/record`，详情页「下载」走 OTM，与 `durl` 里 `fits.rfsvr.net` 直链并存；新链形式为：
+**补充（约 2026-04）**：运动记录前端迁到 `https://u.onelap.cn/recordPage`，详情页「下载」走 OTM，与 `durl` 里 `fits.rfsvr.net` 直链并存；新链形式为：
 
 ```
 GET https://u.onelap.cn/api/otm/ride_record/analysis/fit_content/{BASE64(fileKey路径)}
 ```
 
-其中 `fileKey` 为 **UTF-8 路径**字符串，例如 `geo/20260424/MAGENE_....fit`（**来源**可以是列表，或列表无 `fileKey` 时由 **`GET /analysis/{id}`** 补全），经标准 Base64 编码后作为路径**最后一段**（可含 `=` 填充）。需 **Cookie**；OTM 上通常还带 **`Authorization: Bearer <JWT>`** 与 **`Referer: https://u.onelap.cn/record/details?id=<_id>`**（`raw` 里用 **`_id` 或 `id`** 均可）。**勿**在浏览器地址栏直接打开 `fit_content` URL 来验证——整页导航不会带 `Authorization`，易见 `403`「Authorization fail!」。接入层在 :mod:`onelap2strava.onelap.client` 中对该 GET 带上述 Referer，JWT 在 ``data/.onelap_cookies.json`` 的 ``bearer`` 字段（见 ``onelap-login --bearer``），下载候选**优先**该端点，再回退 `durl` / 旧式 ``/analysis/download/...``。
+其中 `fileKey` 为 **UTF-8 路径**字符串，例如 `geo/20260424/MAGENE_....fit`（**来源**可以是列表，或列表无 `fileKey` 时由 **`GET /analysis/{id}`** 补全），经标准 Base64 编码后作为路径**最后一段**（可含 `=` 填充）。需 **Cookie**；OTM 上通常还带 **`Authorization: Bearer <JWT>`** 与 **`Referer: https://u.onelap.cn/recordPage/details?id=<_id>`**（`raw` 里用 **`_id` 或 `id`** 均可）。**勿**在浏览器地址栏直接打开 `fit_content` URL 来验证——整页导航不会带 `Authorization`，易见 `403`「Authorization fail!」。接入层在 :mod:`onelap2strava.onelap.client` 中对该 GET 带上述 Referer，JWT 在 ``data/.onelap_cookies.json`` 的 ``bearer`` 字段（见 ``onelap-login --bearer``），下载候选**优先**该端点，再回退 `durl` / 旧式 ``/analysis/download/...``。
 
 ### 1.4 登录（待确认）
 

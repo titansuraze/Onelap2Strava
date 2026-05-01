@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}同步历史{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h1>同步历史</h1>
+  {% if rows %}
+    <table>
+      <thead>
+        <tr><th>同步时间</th><th>状态</th><th>开始时间</th><th>顽鹿 ID</th><th>Strava</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.synced_at|dt }}</td>
+            <td>{{ row.status }}</td>
+            <td>{{ row.start_time_utc|dt }}</td>
+            <td><code>{{ row.onelap_activity_id }}</code></td>
+            <td>
+              {% if row.strava_activity_id %}
+                <a href="https://www.strava.com/activities/{{ row.strava_activity_id }}">{{ row.strava_activity_id }}</a>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">还没有同步记录。</p>
+  {% endif %}
+</section>
+{% endblock %}
+

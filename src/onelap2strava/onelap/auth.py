@@ -155,7 +155,7 @@ def save_cookies_from_string(
 ) -> CookieJar:
     """Parse + persist a ``Cookie:`` header string to disk.
 
-    ``bearer`` sets or updates the optional JWT for OTM APIs; ``None`` keeps
+    ``bearer`` sets or updates the Authorization JWT for OTM APIs; ``None`` keeps
     any existing ``bearer`` in the file on disk.
 
     Returns the stored :class:`CookieJar` for caller feedback.

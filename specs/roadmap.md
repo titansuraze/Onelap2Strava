@@ -172,38 +172,37 @@
 
 ---
 
-## Phase 5 💡：Web 化（可选，视需要）
+## Phase 5 🚧：本机 Web 图形界面
 
 ### 目标
-把工具升级为可托管的 Web 服务，支持更友好的授权体验、（可能的）多用户场景，以及**与浏览器同屏的顽鹿 Cookie 录入 / 需要页面交互时的续期**（承接原计划在 CLI 用 WebView 解决的那部分体验，避免命令行单独背一套 Playwright/pywebview）。
+把工具升级为面向骑行者的 **localhost 单用户 Web 控制台**，支持更友好的授权信息管理、近期运动查看、同步历史，以及批量同步 / 同步最新数据两种常用入口。
 
 ### 范围边界
-- 核心依旧是 Phase 1–4 的同步逻辑，Web 层是封装。
-- 决定是"单用户自部署"还是"公开 SaaS"前，先按单用户自部署做，避免合规和账号安全风险。
+- 核心依旧是 Phase 1–4 的同步逻辑，Web 层只是封装，不复制修坐标、去重、重试、上传逻辑。
+- 当前只做本机单用户：默认绑定 `127.0.0.1`，复用本地 `data/.strava_token.json`、`data/.onelap_cookies.json`、`data/.sync.db`。
+- Web 的「批量同步数据」使用增量语义，「同步最新数据」只处理最近一次骑行；CLI `sync` 继续保持默认最新 1 条，避免破坏老用户心智。
+- Docker / NAS / VPS 长期运行、远程访问鉴权、多用户隔离留作未来增强，不作为本阶段门槛。
 
 ### 关键技术点
-- 后端：**FastAPI**（异步、OAuth 回调简单、自动文档）。
-- 任务队列：Celery + Redis（或 FastAPI `BackgroundTasks` 起步）；**定时同步**也可由服务端调度复用 Phase 4 已验证的增量语义。
-- 前端：React/Vue + Tailwind，或 HTMX + Jinja2（MVP 用 HTMX 更省事）。
-- 存储：SQLite（单用户）或 PostgreSQL（多用户），复用 Phase 3 的同步日志 schema。
-- 部署：Docker Compose，可放 Fly.io / Railway / 自有 VPS。
-- 安全：Strava token 加密存储，顽鹿 Cookie 处理需极其谨慎（明确用户协议）。
-- **凭证 UX**：浏览器内完成 Strava OAuth；顽鹿侧以**页面内粘贴或引导登录**替代 CLI 弹 WebView；与 Phase 2 起沿用的 live probe（`/analysis/list`）兼容。
-- **顽鹿 Cookie（由原「CLI 弹窗续期」合并至此）**
-  - **约束**：仍**不走** `browser-cookie3`（Phase 2 v3 已证伪 ABE）。
-  - **CLI 仍可先行**：若未来抓包**一手确认**顽鹿存在 refresh 类接口，可在不改 Web 的前提下以轻量方式补 CLI——与网页续期互补。
-  - **长期 CLI 用户**：过期仍可用 `onelap-login` 手粘；不强迫为了续期而上 Web。
-  - **Web 侧重**：网页内粘贴 Cookie / 嵌入式登录页、「登录一次顽鹿 Web」引导；比 CLI 迷你窗更符合心智。
+- 后端：**FastAPI**，处理页面路由、Strava OAuth 回调、顽鹿 live probe、同步触发。
+- 前端：**Jinja2 + HTMX + 普通 CSS**；不引入 npm 构建链，不做 React/Vue SPA。
+- 同步任务：进程内单任务锁起步，避免连续点击导致并发上传；不引入 Celery / Redis。
+- 存储：沿用本地文件与 SQLite，复用 Phase 3 的同步日志 schema。
+- **凭证 UX**：浏览器内完成 Strava OAuth；顽鹿侧以页面引导 + 表单粘贴 Cookie/Authorization + live probe 验证。
+- **顽鹿 Cookie 约束**：仍**不走** `browser-cookie3`、Playwright 或 WebView（Phase 2 v3 已证伪 ABE）；长期 CLI 用户仍可用 `onelap-login`。
 
 ### 交付标准
-- 浏览器里完成 Strava 授权和顽鹿 Cookie 录入（及过期后的再次录入）。
-- 可查看同步历史、手动触发同步、开关自动同步。
-- 单容器 `docker compose up` 启动。
+- `uv run onelap2strava web` 启动本机 Web 控制台。
+- 浏览器里完成 Strava 授权和顽鹿 Cookie/Authorization 录入（及过期后的再次录入）。
+- 可查看连接状态、近期运动数据和同步历史；近期运动可打开顽鹿详情页。
+- 可手动触发批量同步数据、同步最新数据或单条运动同步。
+- 无前端构建步骤，不需要 npm；测试覆盖 Web 主要路由和同步触发契约。
 
 ### 本阶段不做
+- Docker Compose / NAS / VPS 部署。
+- 远程访问鉴权与公网暴露。
 - 大规模多租户运营（如果走这步需要重新评估合规）。
-- 付费功能。
-- 移动端 App。
+- 付费功能、移动端 App。
 
 ---
 
@@ -222,7 +221,7 @@ Phase 3 ✅ 去重 + 容错 + 增量（需浏览器的顽鹿续期 → Phase 5�
 Phase 4 ✅ 定时同步（计划任务驱动 CLI，解放「记得跑 sync」）
    │
    ▼
-Phase 5 💡 Web 化（按需；含浏览器侧 Cookie 续期与托管形态下的定时同步）
+Phase 5 🚧 本机 Web 图形界面（localhost 控制台；托管/Docker 另列未来增强）
 ```
 
 **每完成一个 Phase，先停下来用一段时间再决定是否做下一阶段**。Phase 1 到 Phase 2 的间隔验证了"手动导出 Fit" 确实是日常摩擦最大的一环；Phase 2 到 Phase 3 的间隔也应该积累足够的"重复上传真的发生了吗 / Cookie 真的几天过期一次吗"这类一手数据，再决定去重与后续体验的优先级。**Phase 4 与 Phase 5 可解耦**：长期只用 CLI 的用户只需做到 Phase 4；需要「打开网页就能续 Cookie」再考虑 Phase 5。

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}一键同步{% endblock %}
+
+{% block content %}
+<section class="card narrow">
+  <h1>同步数据</h1>
+  <p>批量同步会补齐尚未上传的骑行；同步最新数据只处理最近一次骑行。</p>
+
+  <form
+    action="/sync/start"
+    method="post"
+    hx-post="/sync/start"
+    hx-target="#sync-status"
+    hx-swap="outerHTML"
+  >
+    <input type="hidden" name="mode" value="incremental">
+    <button class="primary" type="submit" {% if job.running %}disabled{% endif %}>
+      {% if job.running %}同步中...{% else %}批量同步数据{% endif %}
+    </button>
+  </form>
+  <form
+    action="/sync/start"
+    method="post"
+    hx-post="/sync/start"
+    hx-target="#sync-status"
+    hx-swap="outerHTML"
+  >
+    <input type="hidden" name="mode" value="latest">
+    <button type="submit" {% if job.running %}disabled{% endif %}>同步最新数据</button>
+  </form>
+
+  {% include "partials/sync_status.html" %}
+</section>
+{% endblock %}
+

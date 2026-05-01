@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}顽鹿登录态{% endblock %}
+
+{% block content %}
+<section class="card narrow">
+  <h1>顽鹿登录态</h1>
+  {% if message %}<p class="flash ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+
+  <p class="status {% if onelap.ok %}ok{% else %}warn{% endif %}">{{ onelap.label }}</p>
+  {% if onelap.saved_at %}<p>保存时间：{{ onelap.saved_at|dt }}</p>{% endif %}
+  {% if onelap.detail %}<p class="muted">{{ onelap.detail }}</p>{% endif %}
+
+  <div class="instructions">
+    <p>打开 <a href="https://u.onelap.cn/recordPage" target="_blank" rel="noreferrer">顽鹿运动记录</a> 并确认已经登录。</p>
+    <p>按 F12 打开 Network，搜索 <strong>list</strong>，选择请求地址为 <strong>https://u.onelap.cn/api/otm/ride_record/list</strong> 的那一条。</p>
+    <p>在 Request Headers 里复制 Cookie 和 Authorization，保存后会立即检查是否可用。</p>
+  </div>
+
+  <form action="/onelap" method="post" class="stack">
+    <label>
+      Cookie
+      <textarea name="cookie" rows="5" required placeholder="把 Request Headers 里的 Cookie 粘贴到这里"></textarea>
+    </label>
+    <label>
+      Authorization
+      <textarea name="bearer" rows="3" required placeholder="把 Request Headers 里的 Authorization 粘贴到这里"></textarea>
+    </label>
+    <button class="primary" type="submit">保存并验证</button>
+  </form>
+</section>
+{% endblock %}
+

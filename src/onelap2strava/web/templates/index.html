@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Onelap2Strava 控制台{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">本机同步助手</p>
+  <h1>把顽鹿骑行同步到 Strava</h1>
+  <p>批量同步会补齐尚未上传的骑行；同步最新数据只处理最近一次骑行。</p>
+  <form action="/sync/start" method="post" class="actions">
+    <input type="hidden" name="mode" value="incremental">
+    <button class="primary" type="submit" {% if not strava.ok or not onelap.ok or job.running %}disabled{% endif %}>
+      {% if job.running %}同步中...{% else %}批量同步数据{% endif %}
+    </button>
+  </form>
+  <form action="/sync/start" method="post" class="actions">
+    <input type="hidden" name="mode" value="latest">
+    <button type="submit" {% if not strava.ok or not onelap.ok or job.running %}disabled{% endif %}>
+      同步最新数据
+    </button>
+  </form>
+  {% include "partials/sync_status.html" %}
+</section>
+
+<section class="grid two">
+  <article class="card">
+    <h2>Strava</h2>
+    <p class="status {% if strava.ok %}ok{% else %}warn{% endif %}">{{ strava.label }}</p>
+    {% if strava.expires_at %}<p>授权有效期：{{ strava.expires_at|dt }}</p>{% endif %}
+    {% if strava.detail %}<p class="muted">{{ strava.detail }}</p>{% endif %}
+    <a class="button" href="/auth">管理 Strava 授权</a>
+  </article>
+  <article class="card">
+    <h2>顽鹿</h2>
+    <p class="status {% if onelap.ok %}ok{% else %}warn{% endif %}">{{ onelap.label }}</p>
+    {% if onelap.saved_at %}<p>保存时间：{{ onelap.saved_at|dt }}</p>{% endif %}
+    {% if onelap.detail %}<p class="muted">{{ onelap.detail }}</p>{% endif %}
+    <a class="button" href="/auth">更新顽鹿登录态</a>
+  </article>
+</section>
+
+<section class="card">
+  <h2>近期运动数据</h2>
+  {% if activity_error %}
+    <p class="flash error">读取顽鹿近期运动失败：{{ activity_error }}</p>
+  {% elif activities %}
+    <table>
+      <thead>
+        <tr><th>开始时间</th><th>距离</th><th>爬升</th><th>同步状态</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        {% for row in activities %}
+          <tr class="clickable-row" onclick="window.open('{{ row.detail_url }}', '_blank', 'noopener')">
+            <td><a class="plain-link" href="{{ row.detail_url }}" target="_blank" rel="noreferrer">{{ row.activity.created_at_utc|dt }}</a></td>
+            <td>{{ "%.1f"|format(row.activity.distance_m / 1000.0) }} km</td>
+            <td>{{ "%.0f"|format(row.activity.elevation_m) }} m</td>
+            <td>{{ row.status_label }}</td>
+            <td>
+              {% if row.can_sync %}
+                <form action="/sync/activity/{{ row.activity.activity_id }}" method="post" onclick="event.stopPropagation()">
+                  <button type="submit" {% if not strava.ok or job.running %}disabled{% endif %}>同步</button>
+                </form>
+              {% else %}
+                <span class="muted">-</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">还没有可展示的顽鹿运动数据。</p>
+  {% endif %}
+</section>
+{% endblock %}
+

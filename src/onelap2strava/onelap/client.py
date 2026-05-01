@@ -34,9 +34,9 @@ from .models import Activity
 logger = logging.getLogger(__name__)
 
 BASE_URL_U = "http://u.onelap.cn"
-# 运动记录迁移至 ``/record`` 后，网页「下载」走 OTM，fileKey 路径做 Base64 后挂在此段路径下（2026-04 起）。
+# 运动记录迁移至 ``/recordPage`` 后，网页「下载」走 OTM，fileKey 路径做 Base64 后挂在此段路径下（2026-04 起）。
 PATH_OTM_FIT_CONTENT = "/api/otm/ride_record/analysis/fit_content/"
-# 列表无 fileKey 时用于补全（与 ``/record/details?id=`` 同一条记录）
+# 列表无 fileKey 时用于补全（与 ``/recordPage/details?id=`` 同一条记录）
 OTM_RIDE_RECORD_ANALYSIS_URL = "https://u.onelap.cn/api/otm/ride_record/analysis"
 # 自 2026 起 ``/analysis/list`` 常改为 HTML/重定向；活动列表以 OTM 为优先。可用环境变量
 # ONELAP_LIST_URL 指定单一地址覆盖以下候选（抓包自 Network 中返回 JSON 的那条请求）。
@@ -49,8 +49,8 @@ LIST_ACTIVITY_GET_URLS: tuple[str, ...] = (
     f"https://u.onelap.cn{PATH_LIST}",  # 少数环境仍可能提供 JSON
     f"{BASE_URL_U}{PATH_LIST}",
 )
-# ``/record`` 前端对 ``ride_record/list`` 使用 POST + ``application/json`` 请求体；GET 往往无效。
-# 与 ``/record`` 抓包一致：``{"page":1,"limit":20}``；同步时把 limit 抬高以减少分页往返。
+# ``/recordPage`` 前端对 ``ride_record/list`` 使用 POST + ``application/json`` 请求体；GET 往往无效。
+# 与 ``/recordPage`` 抓包一致：``{"page":1,"limit":20}``；同步时把 limit 抬高以减少分页往返。
 OTM_RIDE_RECORD_LIST_POST_BODIES: tuple[dict[str, Any], ...] = (
     {"page": 1, "limit": 200},
     {"current": 1, "size": 200},
@@ -280,19 +280,19 @@ class OnelapClient:
         elif "u.onelap.cn" in url and "/analysis/download/" in url:
             extra["Referer"] = f"{BASE_URL_U}/analysis/"
         elif "u.onelap.cn" in url and PATH_OTM_FIT_CONTENT in url:
-            # 与 Network 抓包一致：详情页下载时 Referer 为 ``/record/details?id=<_id>``
+            # 与 Network 抓包一致：详情页下载时 Referer 为 ``/recordPage/details?id=<_id>``
             rid: str | None = None
             if activity is not None:
                 meta = activity.raw.get("_id") or activity.raw.get("id")
                 if meta is not None:
                     rid = str(meta)
             if rid:
-                extra["Referer"] = f"https://u.onelap.cn/record/details?id={rid}"
+                extra["Referer"] = f"https://u.onelap.cn/recordPage/details?id={rid}"
             else:
-                extra["Referer"] = "https://u.onelap.cn/record/"
+                extra["Referer"] = "https://u.onelap.cn/recordPage/"
         elif "u.onelap.cn" in url and "/api/otm/ride_record/" in url:
-            # 活动列表、其它 OTM 读接口（与 ``/record`` 前端一致）
-            extra["Referer"] = "https://u.onelap.cn/record/"
+            # 活动列表、其它 OTM 读接口（与 ``/recordPage`` 前端一致）
+            extra["Referer"] = "https://u.onelap.cn/recordPage/"
         try:
             resp = self._session.get(
                 url, timeout=HTTP_TIMEOUT_S, stream=stream, headers=extra or None
@@ -302,10 +302,10 @@ class OnelapClient:
         return resp
 
     def _post_json(self, url: str, data: dict[str, Any]) -> requests.Response:
-        """POST JSON; Used for OTM ``ride_record/list`` (``/record`` 前端为 POST)。"""
+        """POST JSON; Used for OTM ``ride_record/list`` (``/recordPage`` 前端为 POST)。"""
         extra: dict[str, str] = {}
         if "u.onelap.cn" in url and "/api/otm/ride_record/" in url:
-            extra["Referer"] = "https://u.onelap.cn/record/"
+            extra["Referer"] = "https://u.onelap.cn/recordPage/"
         try:
             return self._session.post(
                 url,
@@ -445,7 +445,7 @@ class OnelapClient:
     def list_activities(self, *, limit: int | None = None) -> list[Activity]:
         """Fetch activities from the first working list endpoint, newest first.
 
-        Tries OTM ``/api/otm/ride_record/...`` URLs (``/record`` 前端) first, then
+        Tries OTM ``/api/otm/ride_record/...`` URLs (``/recordPage`` 前端) first, then
         legacy ``/analysis/list``. Override with env ``ONELAP_LIST_URL`` if
         顽鹿再改版。
         """
@@ -485,7 +485,7 @@ class OnelapClient:
                         raise OnelapAuthRequired(
                             "Onelap list endpoint returned non-JSON (login HTML?). "
                             "Re-run `onelap2strava onelap-login` with fresh Cookie "
-                            "and optional `--bearer`."
+                            "and Authorization `--bearer`."
                         ) from e
                     last_error = f"non-JSON: {e!r}"
                     continue

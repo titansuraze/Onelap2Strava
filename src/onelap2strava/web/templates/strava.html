@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Strava 授权{% endblock %}
+
+{% block content %}
+<section class="card narrow">
+  <h1>Strava 授权</h1>
+  {% if message %}<p class="flash ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+
+  <p class="status {% if strava.ok %}ok{% else %}warn{% endif %}">{{ strava.label }}</p>
+  {% if strava.expires_at %}<p>授权有效期：{{ strava.expires_at|dt }}</p>{% endif %}
+  {% if strava.detail %}<p class="muted">{{ strava.detail }}</p>{% endif %}
+
+  {% if strava.configured %}
+    <p>点击下面按钮会跳转到 Strava 官方授权页；授权完成后会回到本地 Web 控制台。</p>
+    <a class="button primary" href="/strava/authorize">授权 Strava</a>
+  {% else %}
+    <p>还没有完成 Strava 应用配置。请先按 README 的“配置 Strava”步骤完成一次配置，然后回到这里授权。</p>
+  {% endif %}
+</section>
+{% endblock %}
+

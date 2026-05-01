@@ -1,0 +1,33 @@
+<div
+  id="sync-status"
+  class="sync-status"
+  {% if job.running %}hx-get="/sync/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}
+>
+  {% if job.running %}
+    <p class="flash warn">同步正在运行，页面会自动刷新状态。</p>
+  {% elif job.error %}
+    <p class="flash error">同步失败：{{ job.error }}</p>
+  {% elif job.report %}
+    <p class="flash ok">
+      同步完成：ok={{ job.report.success_count }}，
+      duplicate={{ job.report.skipped_duplicate_count }}，
+      fail={{ job.report.failure_count }}
+    </p>
+  {% elif job.has_result %}
+    <p class="flash ok">同步完成。</p>
+  {% else %}
+    <p class="muted">还没有本次 Web 同步结果。</p>
+  {% endif %}
+
+  {% if job.started_at %}<p class="muted">开始：{{ job.started_at|dt }}</p>{% endif %}
+  {% if job.finished_at %}<p class="muted">结束：{{ job.finished_at|dt }}</p>{% endif %}
+
+  {% if job.messages %}
+    <ul class="result-list">
+      {% for msg in job.messages %}
+        <li>{{ msg }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>
+
