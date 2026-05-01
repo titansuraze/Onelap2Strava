@@ -190,6 +190,7 @@ A: 曾经实现过（`--from-browser` 选项 + `browser-cookie3` 依赖）。Chr
 
 **Q: `onelap-list` 能用但 `sync` 报错怎么排查？**
 A: `onelap-list` 只拿列表，`sync` 还要下载 Fit 和上传 Strava。如果 `onelap-list` OK，问题多半在后两步：
+- **下载环节**：新版 OTM 列表可能只有 `id` / `distance_km` / `start_riding_time` 这类摘要字段，没有 `fileKey`。工具会先请求 `GET /api/otm/ride_record/analysis/{id}` 补出 `data.ridingRecord.fileKey`，再下载 `fit_content`。若日志仍退回到 `GET http://u.onelap.cn/analysis/download/<id>.fit failed: 500`，说明详情补全没命中；在 DevTools 打开该活动详情页，找返回 `ridingRecord.fileKey` 的 JSON 请求来校准。
 - **下载环节**：`data/cache/` 下是否有半截的 `.fit.part`？（正常情况下成功写入后会原子 rename 掉，有的话说明前次网络中断。）
 - **上传环节**：跑 `uv run onelap2strava token-info` 看 Strava token 还活着吗？过期自动刷新，但如果 refresh token 也失效要重跑 `auth`。
 

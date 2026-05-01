@@ -24,6 +24,7 @@ from onelap2strava.onelap.auth import (
 from onelap2strava.onelap.client import (
     BASE_URL_U,
     LIST_ACTIVITY_GET_URLS,
+    OTM_RIDE_RECORD_ANALYSIS_URL,
     PATH_OTM_FIT_CONTENT,
     OnelapAuthRequired,
     OnelapClient,
@@ -271,6 +272,54 @@ def test_download_fit_cache_hit_skips_network(tmp_path: Path) -> None:
     result = _client().download_fit(activity, cache_dir=tmp_path)
     assert result.path == cached
     assert result.path.read_bytes() == b"cached-bytes"
+
+
+@responses.activate
+def test_download_fit_enriches_otm_summary_with_analysis_filekey(
+    tmp_path: Path,
+) -> None:
+    activity = Activity.from_api(
+        {
+            "id": "69f381e543da01109706ee1f",
+            "created_at": "1970-01-01 08:00:00",
+            "start_riding_time": "2026-04-30 23:03:07",
+            "distance_km": 18.7,
+        }
+    )
+    file_key = "geo/20260501/MAGENE_C506_1777561387_1338356_1777566175621.fit"
+    responses.add(
+        responses.GET,
+        f"{OTM_RIDE_RECORD_ANALYSIS_URL}/{activity.activity_id}",
+        json={
+            "code": 200,
+            "error": "",
+            "data": {
+                "ridingRecord": {
+                    "_id": activity.activity_id,
+                    "created_at": 1_777_566_181,
+                    "totalDistance": 18_695.9,
+                    "elevation": 6,
+                    "fileKey": file_key,
+                    "fitUrl": file_key,
+                    "durl": "https://fits.rfsvr.net/" + file_key,
+                }
+            },
+        },
+        status=200,
+    )
+    otm_https, _ = _otm_urls_for_filekey(file_key)
+    payload = b"FIT\x00" + b"D" * 128
+    responses.add(
+        responses.GET,
+        otm_https,
+        body=payload,
+        status=200,
+        content_type="application/octet-stream",
+    )
+
+    result = _client().download_fit(activity, cache_dir=tmp_path)
+    assert result.path.read_bytes() == payload
+    assert result.size_bytes == len(payload)
 
 
 @responses.activate

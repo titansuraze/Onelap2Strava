@@ -54,7 +54,7 @@ Headers:
 
 约 2026-04 起，列表 `POST /ride_record/list` 的 Payload 抓包为 `{"page":1,"limit":20}`；本仓库会优先用 `page` + 较大 `limit` 等候选体。
 
-**列表项可能是「摘要」行**：仅含 `id`、**`distance_km`**、**`start_riding_time`** 等，**无** `durl` / `fileKey`。接入层在 :mod:`onelap2strava.onelap.models` 中将其转为 ``Activity``（占位 `download_path`、时间用 `start_riding_time` 等、`raw` 里补 `_id` 供 Referer），下载前再由 :mod:`onelap2strava.onelap.client` 尝试 **`/api/otm/ride_record/detail`**（POST/GET 若干形式）**合并** `fileKey` / `durl`；仍无法下载时再对照浏览器详情页 Network 中真实 detail URL 校准。老列表仍可能直接给 `durl` + `fileKey`。
+**列表项可能是「摘要」行**：仅含 `id`、**`distance_km`**、**`start_riding_time`** 等，**无** `durl` / `fileKey`。接入层在 :mod:`onelap2strava.onelap.models` 中将其转为 ``Activity``（占位 `download_path`、时间用 `start_riding_time` 等、`raw` 里补 `_id` 供 Referer），下载前再由 :mod:`onelap2strava.onelap.client` 请求 **`GET /api/otm/ride_record/analysis/{id}`**，从响应的 `data.ridingRecord` 中合并 `fileKey` / `fitUrl` / `durl`。老列表仍可能直接给 `durl` + `fileKey`。
 
 **返回顺序**：接入层将解析结果统一按时间（含摘要里的东八区时间）转 UTC 后**降序**排一次。
 
@@ -74,7 +74,7 @@ Headers:
 GET https://u.onelap.cn/api/otm/ride_record/analysis/fit_content/{BASE64(fileKey路径)}
 ```
 
-其中 `fileKey` 为 **UTF-8 路径**字符串，例如 `geo/20260424/MAGENE_....fit`（**来源**可是列表、或列表无 `fileKey` 时由 **detail 接口** 补全），经标准 Base64 编码后作为路径**最后一段**（可含 `=` 填充）。需 **Cookie**；OTM 上通常还带 **`Authorization: Bearer <JWT>`** 与 **`Referer: https://u.onelap.cn/record/details?id=<_id>`**（`raw` 里用 **`_id` 或 `id`** 均可）。**勿**在浏览器地址栏直接打开 `fit_content` URL 来验证——整页导航不会带 `Authorization`，易见 `403`「Authorization fail!」。接入层在 :mod:`onelap2strava.onelap.client` 中对该 GET 带上述 Referer，JWT 在 ``data/.onelap_cookies.json`` 的 ``bearer`` 字段（见 ``onelap-login --bearer``），下载候选**优先**该端点，再回退 `durl` / 旧式 ``/analysis/download/...``。
+其中 `fileKey` 为 **UTF-8 路径**字符串，例如 `geo/20260424/MAGENE_....fit`（**来源**可以是列表，或列表无 `fileKey` 时由 **`GET /analysis/{id}`** 补全），经标准 Base64 编码后作为路径**最后一段**（可含 `=` 填充）。需 **Cookie**；OTM 上通常还带 **`Authorization: Bearer <JWT>`** 与 **`Referer: https://u.onelap.cn/record/details?id=<_id>`**（`raw` 里用 **`_id` 或 `id`** 均可）。**勿**在浏览器地址栏直接打开 `fit_content` URL 来验证——整页导航不会带 `Authorization`，易见 `403`「Authorization fail!」。接入层在 :mod:`onelap2strava.onelap.client` 中对该 GET 带上述 Referer，JWT 在 ``data/.onelap_cookies.json`` 的 ``bearer`` 字段（见 ``onelap-login --bearer``），下载候选**优先**该端点，再回退 `durl` / 旧式 ``/analysis/download/...``。
 
 ### 1.4 登录（待确认）
 

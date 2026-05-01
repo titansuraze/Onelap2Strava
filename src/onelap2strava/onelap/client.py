@@ -37,7 +37,7 @@ BASE_URL_U = "http://u.onelap.cn"
 # 运动记录迁移至 ``/record`` 后，网页「下载」走 OTM，fileKey 路径做 Base64 后挂在此段路径下（2026-04 起）。
 PATH_OTM_FIT_CONTENT = "/api/otm/ride_record/analysis/fit_content/"
 # 列表无 fileKey 时用于补全（与 ``/record/details?id=`` 同一条记录）
-OTM_RIDE_RECORD_DETAIL_URL = "https://u.onelap.cn/api/otm/ride_record/detail"
+OTM_RIDE_RECORD_ANALYSIS_URL = "https://u.onelap.cn/api/otm/ride_record/analysis"
 # 自 2026 起 ``/analysis/list`` 常改为 HTML/重定向；活动列表以 OTM 为优先。可用环境变量
 # ONELAP_LIST_URL 指定单一地址覆盖以下候选（抓包自 Network 中返回 JSON 的那条请求）。
 PATH_LIST = "/analysis/list"  # 遗留名；仍作候选之末，便于旧站兼容
@@ -129,7 +129,7 @@ def _is_otm_ride_record_list_url(url: str) -> bool:
 
 
 def _otm_json_detail_merge_dict(resp: requests.Response) -> dict[str, Any] | None:
-    """Parse ``/ride_record/detail``-style body; return a dict to merge into list row."""
+    """Parse OTM analysis/detail body; return a dict to merge into list row."""
     try:
         j = resp.json()
     except ValueError:
@@ -140,12 +140,16 @@ def _otm_json_detail_merge_dict(resp: requests.Response) -> dict[str, Any] | Non
     if c is not None and c not in (200, 0, "200", "0", "ok", True):
         return None
     data = j.get("data")
-    if isinstance(data, dict) and (
-        data.get("fileKey")
-        or data.get("durl")
-        or data.get("fitUrl")
-    ):
-        return data
+    if isinstance(data, dict):
+        record = data.get("ridingRecord")
+        if isinstance(record, dict) and (
+            record.get("fileKey")
+            or record.get("durl")
+            or record.get("fitUrl")
+        ):
+            return record
+        if data.get("fileKey") or data.get("durl") or data.get("fitUrl"):
+            return data
     if j.get("fileKey") or j.get("durl") or j.get("fitUrl"):
         return {k: j[k] for k in j if k in ("fileKey", "durl", "fitUrl")}
     return None
@@ -383,10 +387,15 @@ class OnelapClient:
         return None
 
     def _otm_detail_dict_for_merge(self, record_id: str) -> dict[str, Any] | None:
-        """Fetch record detail to obtain ``fileKey`` / ``durl`` when list is summary-only."""
-        for body in ({"_id": record_id}, {"id": record_id}):
+        """Fetch record analysis to obtain ``fileKey`` / ``durl`` when list is summary-only."""
+        detail_urls = [
+            f"{OTM_RIDE_RECORD_ANALYSIS_URL}/{quote(record_id, safe='')}",
+            # Historical guesses kept as low-priority fallback in case OTM changes again.
+            "https://u.onelap.cn/api/otm/ride_record/detail",
+        ]
+        for url in detail_urls:
             try:
-                r = self._post_json(OTM_RIDE_RECORD_DETAIL_URL, body)
+                r = self._get(url, stream=False)
             except OnelapError:
                 continue
             if r.status_code != 200:
@@ -394,9 +403,19 @@ class OnelapClient:
             out = _otm_json_detail_merge_dict(r)
             if out:
                 return out
-        for qs in ({"_id": record_id}, {"id": record_id}):
+        for body in ({"id": record_id}, {"_id": record_id}):
             try:
-                u = f"{OTM_RIDE_RECORD_DETAIL_URL}?{urlencode(qs)}"
+                r = self._post_json(OTM_RIDE_RECORD_ANALYSIS_URL, body)
+            except OnelapError:
+                continue
+            if r.status_code != 200:
+                continue
+            out = _otm_json_detail_merge_dict(r)
+            if out:
+                return out
+        for qs in ({"id": record_id}, {"_id": record_id}):
+            try:
+                u = f"{OTM_RIDE_RECORD_ANALYSIS_URL}?{urlencode(qs)}"
                 r = self._get(u, stream=False)
             except OnelapError:
                 continue
