@@ -33,7 +33,8 @@ from .models import Activity
 
 logger = logging.getLogger(__name__)
 
-BASE_URL_U = "http://u.onelap.cn"
+BASE_URL_U = "https://u.onelap.cn"
+LEGACY_BASE_URL_U = "http://u.onelap.cn"
 # 运动记录迁移至 ``/recordPage`` 后，网页「下载」走 OTM，fileKey 路径做 Base64 后挂在此段路径下（2026-04 起）。
 PATH_OTM_FIT_CONTENT = "/api/otm/ride_record/analysis/fit_content/"
 # 列表无 fileKey 时用于补全（与 ``/recordPage/details?id=`` 同一条记录）
@@ -47,7 +48,7 @@ LIST_ACTIVITY_GET_URLS: tuple[str, ...] = (
     "https://u.onelap.cn/api/otm/ride_record/records",
     "https://u.onelap.cn/api/otm/ride_record/analysis/list",
     f"https://u.onelap.cn{PATH_LIST}",  # 少数环境仍可能提供 JSON
-    f"{BASE_URL_U}{PATH_LIST}",
+    f"{LEGACY_BASE_URL_U}{PATH_LIST}",
 )
 # ``/recordPage`` 前端对 ``ride_record/list`` 使用 POST + ``application/json`` 请求体；GET 往往无效。
 # 与 ``/recordPage`` 抓包一致：``{"page":1,"limit":20}``；同步时把 limit 抬高以减少分页往返。

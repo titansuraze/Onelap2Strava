@@ -104,6 +104,7 @@ def test_auth_page_combines_strava_and_onelap() -> None:
     assert "Onelap ready" in response.text
     assert "Cookie" in response.text
     assert "Authorization" in response.text
+    assert response.text.index("Authorization") < response.text.index("Cookie")
 
 
 def test_legacy_auth_pages_redirect_to_combined_page() -> None:
